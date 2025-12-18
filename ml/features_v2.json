@@ -16,13 +16,6 @@
     " ERC20 uniq sent addr",
     " ERC20 uniq rec addr",
     " ERC20 uniq sent token name",
-    " ERC20 uniq rec token name",
-    "unique_sent_addresses",
-    "unique_received_addresses",
-    "failed_tx_ratio",
-    "avg_gas_used",
-    "total_tx_count",
-    "sent_received_ratio",
-    "erc20_total_txs"
+    " ERC20 uniq rec token name"
   ]
 }
