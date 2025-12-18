@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: system-ui;
+        width: 340px;
+        padding: 16px;
+        margin: 0;
+        background: #1a1a2e;
+        color: #eee;
+      }
+      .score {
+        font-size: 48px;
+        font-weight: 700;
+        text-align: center;
+        margin: 8px 0;
+      }
+      .level {
+        text-align: center;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 14px;
+        display: inline-block;
+        margin: 0 auto 8px;
+        width: fit-content;
+      }
+      .muted {
+        opacity: 0.6;
+        font-size: 12px;
+      }
+      .url {
+        text-align: center;
+        word-break: break-all;
+        margin-bottom: 12px;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #333;
+        margin: 12px 0;
+      }
+      .section-title {
+        font-weight: 600;
+        font-size: 13px;
+        margin: 8px 0 6px;
+        color: #aaa;
+      }
+      .score-component {
+        display: flex;
+        align-items: center;
+        margin: 6px 0;
+        font-size: 12px;
+      }
+      .score-label {
+        width: 100px;
+        flex-shrink: 0;
+      }
+      .score-bar-container {
+        flex: 1;
+        height: 8px;
+        background: #333;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 0 8px;
+      }
+      .score-bar {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s;
+      }
+      .score-value {
+        width: 30px;
+        text-align: right;
+        font-weight: 600;
+      }
+      .reasons {
+        padding-left: 18px;
+        margin: 8px 0;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .reasons li {
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="text-align: center"><div id="app">Loading…</div></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
