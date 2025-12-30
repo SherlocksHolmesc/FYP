@@ -3,91 +3,279 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      body {
-        font-family: system-ui;
-        width: 340px;
-        padding: 16px;
+      * {
         margin: 0;
-        background: #1a1a2e;
-        color: #eee;
+        padding: 0;
+        box-sizing: border-box;
       }
-      .score {
-        font-size: 48px;
-        font-weight: 700;
-        text-align: center;
-        margin: 8px 0;
+
+      :root {
+        --bg-dark: #0d0e1a;
+        --bg-card: #1a1b2e;
+        --bg-hover: #252640;
+        --accent-pink: #ff007a;
+        --accent-blue: #2172e5;
+        --accent-green: #27ae60;
+        --text-primary: #ffffff;
+        --text-secondary: #b8b9bf;
+        --border: #2c2f36;
       }
-      .level {
-        text-align: center;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-weight: 600;
-        font-size: 14px;
-        display: inline-block;
-        margin: 0 auto 8px;
-        width: fit-content;
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        width: 380px;
+        background: var(--bg-dark);
+        color: var(--text-primary);
       }
-      .muted {
-        opacity: 0.6;
-        font-size: 12px;
+
+      .container {
+        padding: 20px;
       }
-      .url {
-        text-align: center;
-        word-break: break-all;
-        margin-bottom: 12px;
-      }
-      hr {
-        border: none;
-        border-top: 1px solid #333;
-        margin: 12px 0;
-      }
-      .section-title {
-        font-weight: 600;
-        font-size: 13px;
-        margin: 8px 0 6px;
-        color: #aaa;
-      }
-      .score-component {
+
+      .header {
         display: flex;
         align-items: center;
-        margin: 6px 0;
-        font-size: 12px;
+        justify-content: space-between;
+        margin-bottom: 20px;
       }
-      .score-label {
-        width: 100px;
-        flex-shrink: 0;
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        font-size: 16px;
+        background: linear-gradient(90deg, var(--accent-pink), var(--accent-blue));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
       }
-      .score-bar-container {
-        flex: 1;
-        height: 8px;
-        background: #333;
-        border-radius: 4px;
-        overflow: hidden;
-        margin: 0 8px;
+
+      .shield-icon {
+        font-size: 20px;
       }
-      .score-bar {
-        height: 100%;
-        border-radius: 4px;
-        transition: width 0.3s;
-      }
-      .score-value {
-        width: 30px;
-        text-align: right;
+
+      .status-badge {
+        padding: 4px 10px;
+        background: rgba(39, 174, 96, 0.15);
+        border: 1px solid rgba(39, 174, 96, 0.3);
+        border-radius: 12px;
+        font-size: 11px;
+        color: var(--accent-green);
         font-weight: 600;
       }
-      .reasons {
-        padding-left: 18px;
-        margin: 8px 0;
-        font-size: 12px;
-        line-height: 1.6;
+
+      .score-card {
+        background: linear-gradient(135deg, rgba(255, 0, 122, 0.1), rgba(33, 114, 229, 0.1));
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 24px;
+        text-align: center;
+        margin-bottom: 20px;
+        position: relative;
+        overflow: hidden;
       }
-      .reasons li {
-        margin: 4px 0;
+
+      .score-card::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255, 0, 122, 0.1), transparent);
+        animation: rotate 10s linear infinite;
+      }
+
+      @keyframes rotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      .score-content {
+        position: relative;
+        z-index: 1;
+      }
+
+      .score-value {
+        font-size: 64px;
+        font-weight: 800;
+        line-height: 1;
+        margin-bottom: 12px;
+      }
+
+      .score-label {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+
+      .risk-badge {
+        display: inline-block;
+        padding: 6px 16px;
+        border-radius: 16px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-top: 12px;
+        color: white;
+      }
+
+      .info-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+      }
+
+      .info-row:not(:last-child) {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .info-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+
+      .info-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .components-title {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+
+      .component {
+        display: grid;
+        grid-template-columns: 80px 1fr 35px;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 10px;
+        font-size: 11px;
+      }
+
+      .component-label {
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+
+      .progress-bar {
+        height: 6px;
+        background: var(--bg-dark);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.5s ease;
+      }
+
+      .component-value {
+        text-align: right;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .flags-section {
+        margin-top: 16px;
+      }
+
+      .flags-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .flag-item {
+        padding: 8px 12px;
+        background: rgba(255, 0, 122, 0.1);
+        border: 1px solid rgba(255, 0, 122, 0.2);
+        border-radius: 10px;
+        font-size: 11px;
+        color: var(--accent-pink);
+        font-weight: 500;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+      }
+
+      .empty-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+      }
+
+      .empty-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .empty-text {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+
+      .url-badge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        background: var(--bg-dark);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin-bottom: 16px;
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+
+      .url-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .pulse {
+        width: 6px;
+        height: 6px;
+        background: var(--accent-green);
+        border-radius: 50%;
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(0.8); }
       }
     </style>
   </head>
   <body>
-    <div style="text-align: center"><div id="app">Loading…</div></div>
+    <div class="container">
+      <div id="app">
+        <div class="empty-state">
+          <div class="empty-icon">🔄</div>
+          <div class="empty-title">Loading...</div>
+        </div>
+      </div>
+    </div>
     <script src="popup.js"></script>
   </body>
 </html>
