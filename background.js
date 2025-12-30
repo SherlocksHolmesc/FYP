@@ -99,6 +99,10 @@ async function getMLScore(address) {
       score: data.score || 0,
       prediction: data.prediction || "UNKNOWN",
       confidence: data.confidence || 0,
+      goplusFlags: data.goplus_flags || [],
+      isHoneypot: data.is_honeypot || false,
+      mlScore: data.components?.ml_score || 0,
+      goplusScore: data.components?.goplus_score || 0,
       timestamp: Date.now(),
     };
 
@@ -303,6 +307,21 @@ async function scoreRequest(req) {
             mlResult.confidence * 100
           )}% confidence)`
         );
+      }
+
+      // Add GoPlus flags as warnings
+      if (mlResult.goplusFlags && mlResult.goplusFlags.length > 0) {
+        mlResult.goplusFlags.forEach((flag) => {
+          if (!flag.startsWith("✓")) {
+            // Skip positive indicators
+            heuristic.reasons.push(`⚠️ GoPlus: ${flag}`);
+          }
+        });
+      }
+
+      // Honeypot warning
+      if (mlResult.isHoneypot) {
+        heuristic.reasons.push(`🚨 HONEYPOT DETECTED - Cannot sell tokens!`);
       }
     } else if (mlResult.fallback) {
       heuristic.reasons.push("ML API unavailable - using heuristic fallback");

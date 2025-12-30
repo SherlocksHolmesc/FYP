@@ -45,6 +45,7 @@ function renderScoreBar(label, value, max = 100) {
     darklist: 0,
     ml: score,
   };
+  const mlPrediction = data.analysis?.mlPrediction || "N/A";
   const lvl = level(score);
 
   el.innerHTML = `
@@ -52,14 +53,19 @@ function renderScoreBar(label, value, max = 100) {
       lvl.color
     }">${score} <span class="muted">/100</span></div>
     <div class="level" style="background: ${lvl.color}">${lvl.text}</div>
+    ${
+      mlPrediction !== "N/A"
+        ? `<div class="prediction">${mlPrediction}</div>`
+        : ""
+    }
     <div class="muted url">${data.href}</div>
     
     <hr/>
     
     <div class="section-title">Hybrid Score Breakdown</div>
-    ${renderScoreBar("Heuristic (40%)", components.heuristic)}
-    ${renderScoreBar("Darklist (35%)", components.darklist)}
-    ${renderScoreBar("ML Model (25%)", components.ml)}
+    ${renderScoreBar("Heuristic", components.heuristic)}
+    ${renderScoreBar("Darklist", components.darklist)}
+    ${renderScoreBar("ML + GoPlus", components.ml)}
     
     <hr/>
     
