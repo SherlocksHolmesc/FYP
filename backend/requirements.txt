@@ -4,3 +4,4 @@ requests==2.31.0
 pandas==2.2.0
 scikit-learn==1.4.0
 python-dotenv==1.0.0
+beautifulsoup4==4.12.3

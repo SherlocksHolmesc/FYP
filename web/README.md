@@ -13,22 +13,26 @@ Modern landing page for the Web3 Risk Guard browser extension with integrated se
 ## Setup
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Make sure the backend API is running:
+
 ```bash
 cd ../backend
 python api.py
 ```
 
 3. Start the development server:
+
 ```bash
 npm run dev
 ```
 
 4. Build for production:
+
 ```bash
 npm run build
 ```
