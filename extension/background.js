@@ -134,6 +134,8 @@ async function checkSimulation(url) {
   try {
     const normalized = new URL(url).origin;
 
+    console.log(`[W3RG] 🔍 Checking simulation for: ${normalized}`);
+
     // Check cache first
     const cached = simulationCache.get(normalized);
     if (cached && Date.now() - cached.timestamp < SIM_CACHE_TTL) {
@@ -142,7 +144,11 @@ async function checkSimulation(url) {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for simulation
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout for simulation (complex dApps like MetaMask take time)
+
+    console.log(
+      `[W3RG] 📡 Calling simulation API: ${ML_API_URL}/simulate-dapp?url=${normalized}`
+    );
 
     const response = await fetch(
       `${ML_API_URL}/simulate-dapp?url=${encodeURIComponent(url)}`,
@@ -155,6 +161,8 @@ async function checkSimulation(url) {
     }
 
     const data = await response.json();
+
+    console.log(`[W3RG] 📊 Simulation response:`, data);
 
     const result = {
       is_malicious: data.is_malicious || false,
@@ -176,6 +184,18 @@ async function checkSimulation(url) {
     return result;
   } catch (e) {
     console.warn(`[W3RG] Simulation API error: ${e.message}`);
+
+    // If timeout, assume safe with note (complex sites take long to analyze)
+    if (e.message.includes("aborted")) {
+      return {
+        is_malicious: false,
+        confidence: 70,
+        error: "Analysis timeout - site may be complex",
+        note: "Simulation took too long. Complex sites like wallets are harder to analyze.",
+        fallback: true,
+      };
+    }
+
     return {
       is_malicious: false,
       confidence: 0,
@@ -207,6 +227,22 @@ function showDangerNotification(simResult, url) {
   });
 
   console.log(`[W3RG] 🚨 Danger notification shown for ${domain}`);
+}
+
+function showSafeNotification(simResult, url) {
+  const domain = new URL(url).hostname;
+  let message = `This website appears to be safe (${simResult.confidence}% confidence).`;
+
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: "✅ Safe Website Detected",
+    message: message,
+    priority: 2,
+    requireInteraction: true, // Changed to true - user must dismiss
+  });
+
+  console.log(`[W3RG] ✅ Safe notification shown for ${domain}`);
 }
 
 // ============================================================
@@ -464,43 +500,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       const simResult = await checkSimulation(url);
 
-      // CRITICAL: If simulation detects malicious behavior with high confidence
+      // If simulation detects malicious behavior, store it but don't block (user can decide)
       if (simResult.is_malicious && simResult.confidence >= 85) {
-        console.log(`[W3RG] 🚨 BLOCKING malicious wallet request on ${url}`);
+        console.log(
+          `[W3RG] ⚠️ Malicious simulation detected on ${url} (${simResult.confidence}% confidence)`
+        );
 
-        // Show danger notification
-        showDangerNotification(simResult, url);
-
-        // Store blocked request info
+        // Store simulation warning info (but allow request to continue)
         const analysis = {
-          score: 100,
+          score: 85,
           reasons: [
-            "🚨 SIMULATION BLOCKED - Malicious behavior detected",
-            `Confidence: ${simResult.confidence}%`,
+            `⚠️ Simulation detected ${simResult.confidence}% malicious confidence`,
             ...(simResult.typosquatting_detected
-              ? [`⚠️ Typosquatting: Site mimics ${simResult.similar_to}`]
+              ? [`Typosquatting: Site mimics ${simResult.similar_to}`]
               : []),
-            ...(simResult.risk_factors || []).map((f) => `⚠️ ${f}`),
+            ...(simResult.risk_factors || []).map((f) =>
+              typeof f === "string"
+                ? f
+                : f.description || f.name || JSON.stringify(f)
+            ),
           ],
-          decoded: { fn: "blocked" },
+          decoded: { fn: msg.payload.method },
           components: {
             heuristic: 0,
             darklist: 0,
-            ml: 100,
+            ml: 85,
           },
           simulation: simResult,
-          blocked: true,
+          blocked: false, // Don't block - just warn
         };
 
         latestByTab.set(tabId, { ...msg.payload, analysis });
-        sendResponse({
-          blocked: true,
-          reason: "Simulation detected malicious behavior",
-        });
-        return;
       }
 
-      // If simulation says safe or low confidence, proceed with normal scoring
+      // Always proceed with normal scoring (don't block)
       scoreRequest(msg.payload).then((analysis) => {
         // Attach simulation result to analysis
         analysis.simulation = simResult;
@@ -514,103 +547,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg?.type === "GET_LATEST") {
     const tabId = msg.tabId;
-    const tabData = latestByTab.get(tabId);
-
-    console.log(`[W3RG] GET_LATEST request for tab ${tabId}`);
-    console.log(`[W3RG] Tab data exists:`, !!tabData);
-    console.log(`[W3RG] Total cached tabs:`, latestByTab.size);
-
-    // If no data for current tab, return most recent simulation from any tab
-    if (!tabData && latestByTab.size > 0) {
-      const allEntries = Array.from(latestByTab.entries());
-      const mostRecent = allEntries.sort(
-        (a, b) => (b[1].ts || 0) - (a[1].ts || 0)
-      )[0];
-      console.log(
-        `[W3RG] No data for tab ${tabId}, returning most recent from tab ${mostRecent[0]}`
-      );
-      sendResponse(mostRecent[1]);
-    } else {
-      sendResponse(tabData || null);
-    }
-
+    sendResponse(latestByTab.get(tabId) || null);
     return true; // Keep channel open for async
   }
 
   // NEW: Proactive page load simulation (background cache warming)
   if (msg?.type === "PAGE_LOADED") {
+    console.log(`[W3RG] 📄 PAGE_LOADED message received:`, msg.url);
     const url = msg.url;
-    const tabId = msg.tabId;
+    const tabId = sender.tab?.id;
 
     if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
-      console.log(`[W3RG] 🔍 Checking simulation for: ${url}`);
-
       // Silently check simulation in background (populates cache)
       checkSimulation(url).then((simResult) => {
-        console.log(`[W3RG] 📊 Simulation response:`, simResult);
+        console.log(
+          `[W3RG] 🔔 Deciding notification - malicious: ${simResult.is_malicious}, confidence: ${simResult.confidence}`
+        );
 
-        // Store simulation result for popup to access
-        const analysisData = {
-          origin: url,
-          href: url,
-          ts: Date.now(),
-          analysis: {
-            score: simResult.is_malicious ? 95 : 0,
-            simulation: simResult,
+        // CRITICAL: Store simulation result for popup to retrieve!
+        if (tabId) {
+          const analysis = {
+            score: simResult.is_malicious ? 85 : 10,
             reasons: simResult.is_malicious
               ? [
-                  `⚠️ Malicious dApp detected (${simResult.confidence}% confidence)`,
+                  `Simulation detected ${simResult.confidence}% malicious confidence`,
+                  ...(simResult.typosquatting_detected
+                    ? [`Typosquatting: Site mimics ${simResult.similar_to}`]
+                    : []),
+                  ...(simResult.risk_factors || []).map((f) =>
+                    typeof f === "string"
+                      ? f
+                      : f.description || f.name || JSON.stringify(f)
+                  ),
                 ]
-              : [],
+              : ["No threats detected"],
             components: {
               heuristic: 0,
               darklist: 0,
-              ml: 0,
+              ml: simResult.is_malicious ? 85 : 10,
             },
-          },
-        };
+            simulation: simResult,
+            blocked: false,
+          };
 
-        latestByTab.set(tabId, analysisData);
-        console.log(
-          `[W3RG] Simulation result: ${
-            simResult.is_malicious ? "MALICIOUS" : "SAFE"
-          } (${simResult.confidence}% confidence)`
-        );
+          latestByTab.set(tabId, {
+            origin: url,
+            href: url,
+            ts: Date.now(),
+            analysis,
+          });
 
-        // Show notification/banner if CRITICAL
-        if (simResult.is_malicious && simResult.confidence >= 85) {
-          console.log(
-            `[W3RG] 🔔 Deciding notification - malicious: ${simResult.is_malicious}, confidence: ${simResult.confidence}`
-          );
+          console.log(`[W3RG] 💾 Stored simulation data for tab ${tabId}`);
+        }
 
-          // Show banner on the page
+        // Send result to content.js to show on-page banner
+        if (tabId && simResult.confidence >= 80) {
           chrome.tabs
             .sendMessage(tabId, {
               type: "SHOW_BANNER",
-              data: {
-                malicious: true,
-                confidence: simResult.confidence,
-                reason: simResult.reason || "Malicious behavior detected",
-                risk_factors: simResult.risk_factors || [],
-              },
+              data: simResult,
             })
-            .then(() => {
-              console.log(`[W3RG] ✅ Banner message sent to tab ${tabId}`);
-            })
-            .catch((err) => {
-              console.warn(`[W3RG] Banner send failed:`, err);
-            });
-
-          // Show system notification for typosquatting
-          if (
-            simResult.typosquatting_detected ||
-            (simResult.risk_factors && simResult.risk_factors.length > 0)
-          ) {
-            showDangerNotification(simResult, url);
-          }
+            .catch((err) =>
+              console.log("[W3RG] Could not send banner message:", err)
+            );
+          console.log(`[W3RG] ✅ Banner message sent to tab ${tabId}`);
+        } else {
+          console.log(
+            `[W3RG] No banner (confidence too low: ${simResult.confidence}%)`
+          );
         }
       });
+    } else {
+      console.log(`[W3RG] ⏭️ Skipping non-http URL: ${url}`);
     }
-    return true;
   }
 });

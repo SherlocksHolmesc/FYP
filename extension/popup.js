@@ -57,11 +57,14 @@ function renderMarquee() {
 
 (async () => {
   const tab = await getActiveTab();
+
   console.log(`[W3RG POPUP] Querying data for tab ${tab.id}: ${tab.url}`);
+
   const data = await chrome.runtime.sendMessage({
     type: "GET_LATEST",
     tabId: tab.id,
   });
+
   console.log(`[W3RG POPUP] Received data:`, data);
 
   const el = document.getElementById("app");
@@ -103,6 +106,9 @@ function renderMarquee() {
   const blocked = data.analysis?.blocked || false;
   const lvl = getRiskLevel(score);
   const hostname = new URL(data.href).hostname;
+  const method = data.method || "Unknown";
+  const params = data.params || [];
+  const origin = data.origin || hostname;
 
   el.innerHTML = `
     <div class="header">
@@ -151,6 +157,16 @@ function renderMarquee() {
           <span class="info-value">${simulation.confidence}%</span>
         </div>
         ${
+          simulation.method
+            ? `
+          <div class="info-row">
+            <span class="info-label">Detection Method</span>
+            <span class="info-value" style="font-size: 11px; opacity: 0.9;">${simulation.method}</span>
+          </div>
+        `
+            : ""
+        }
+        ${
           simulation.reason
             ? `
           <div class="info-row">
@@ -165,7 +181,7 @@ function renderMarquee() {
             ? `
           <div class="info-row">
             <span class="info-label">⚠️ Typosquatting</span>
-            <span class="info-value">Similar to: ${simulation.similar_to}</span>
+            <span class="info-value text-danger">Did you mean ${simulation.similar_to}?</span>
           </div>
         `
             : ""
@@ -174,19 +190,18 @@ function renderMarquee() {
           simulation.risk_factors && simulation.risk_factors.length > 0
             ? `
           <div class="info-row" style="flex-direction: column; align-items: flex-start;">
-            <span class="info-label">🚨 Detected Attacks</span>
+            <span class="info-label">Risk Factors</span>
             <div style="margin-top: 6px; width: 100%;">
               ${simulation.risk_factors
                 .slice(0, 3)
                 .map(
                   (f) => `
-                <div style="padding: 6px 10px; background: rgba(239, 68, 68, 0.15); border-left: 3px solid #ef4444; margin-bottom: 6px; font-size: 11px; border-radius: 4px;">
-                  <div style="font-weight: 600; color: #ef4444; margin-bottom: 2px;">${
-                    f.type || "Unknown"
-                  } (${f.severity || "HIGH"})</div>
-                  <div style="opacity: 0.9;">${
-                    f.description || f.evidence || "Malicious behavior detected"
-                  }</div>
+                <div style="padding: 4px 8px; background: rgba(239, 68, 68, 0.1); border-left: 2px solid #ef4444; margin-bottom: 4px; font-size: 11px; border-radius: 3px;">
+                  ${
+                    typeof f === "string"
+                      ? f
+                      : f.description || f.name || JSON.stringify(f)
+                  }
                 </div>
               `
                 )
@@ -194,8 +209,8 @@ function renderMarquee() {
               ${
                 simulation.risk_factors.length > 3
                   ? `
-                <div style="font-size: 10px; opacity: 0.6; margin-top: 4px; text-align: center;">
-                  +${simulation.risk_factors.length - 3} more threats detected
+                <div style="font-size: 10px; opacity: 0.6; margin-top: 4px;">
+                  +${simulation.risk_factors.length - 3} more
                 </div>
               `
                   : ""
@@ -212,44 +227,61 @@ function renderMarquee() {
 
     <div class="info-card">
       <div class="card-header">
-        <span class="card-title">Request Info</span>
+        <span class="card-title">Request Details</span>
         <span class="card-num">${simulation ? "02" : "01"}</span>
       </div>
       <div class="info-row">
         <span class="info-label">Method</span>
-        <span class="info-value">${data.method || "Unknown"}</span>
+        <span class="info-value" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(139, 92, 246, 0.1); padding: 2px 6px; border-radius: 4px;">${method}</span>
+      </div>
+      ${
+        params && params.length > 0
+          ? `
+        <div class="info-row" style="flex-direction: column; align-items: flex-start;">
+          <span class="info-label">Parameters</span>
+          <div style="margin-top: 6px; width: 100%; max-height: 120px; overflow-y: auto;">
+            ${params
+              .slice(0, 5)
+              .map(
+                (p, i) => `
+              <div style="padding: 6px 8px; background: rgba(0, 0, 0, 0.2); margin-bottom: 4px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; word-break: break-all;">
+                <span style="color: #a5b4fc; font-weight: 600;">[${i}]</span>
+                <span style="color: #cbd5e1; margin-left: 6px;">
+                  ${
+                    typeof p === "string" && p.length > 50
+                      ? p.substring(0, 50) + "..."
+                      : JSON.stringify(p)
+                  }
+                </span>
+              </div>
+            `
+              )
+              .join("")}
+            ${
+              params.length > 5
+                ? `
+              <div style="font-size: 10px; opacity: 0.6; padding: 4px 8px;">
+                +${params.length - 5} more parameters
+              </div>
+            `
+                : ""
+            }
+          </div>
+        </div>
+      `
+          : ""
+      }
+      <div class="info-row">
+        <span class="info-label">Origin</span>
+        <span class="info-value" style="font-size: 11px; word-break: break-all;">${origin}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Timestamp</span>
+        <span class="info-value">${new Date(
+          data.ts
+        ).toLocaleTimeString()}</span>
       </div>
     </div>
-
-    ${
-      components.heuristic !== undefined ||
-      components.darklist !== undefined ||
-      components.ml !== undefined
-        ? `
-      <div class="info-card">
-        <div class="card-header">
-          <span class="card-title">Detection Breakdown</span>
-          <span class="card-num">${simulation ? "03" : "02"}</span>
-        </div>
-        ${
-          components.heuristic !== undefined
-            ? renderComponent("Heuristic", components.heuristic, "01")
-            : ""
-        }
-        ${
-          components.darklist !== undefined
-            ? renderComponent("Blacklist", components.darklist, "02")
-            : ""
-        }
-        ${
-          components.ml !== undefined
-            ? renderComponent("ML Model", components.ml, "03")
-            : ""
-        }
-      </div>
-    `
-        : ""
-    }
 
     ${
       reasons.length > 0
@@ -257,7 +289,7 @@ function renderMarquee() {
       <div class="info-card">
         <div class="card-header">
           <span class="card-title">Risk Indicators</span>
-          <span class="card-num">${simulation ? "04" : "03"}</span>
+          <span class="card-num">${simulation ? "03" : "02"}</span>
         </div>
         <div class="flags-list">
           ${reasons

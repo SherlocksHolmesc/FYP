@@ -12,6 +12,23 @@ window.addEventListener("message", (event) => {
 
   chrome.runtime.sendMessage({
     type: "WALLET_REQUEST",
-    payload: msg.payload
+    payload: msg.payload,
   });
 });
+
+// ============================================================
+// PROACTIVE SIMULATION - Run on page load
+// ============================================================
+// This pre-populates the simulation cache before user interacts
+// Only runs on http/https pages to avoid unnecessary checks
+if (
+  window.location.protocol === "http:" ||
+  window.location.protocol === "https:"
+) {
+  chrome.runtime.sendMessage({
+    type: "PAGE_LOADED",
+    url: window.location.href,
+  });
+
+  console.log("[W3RG] Page loaded - background simulation check initiated");
+}

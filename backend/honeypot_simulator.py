@@ -28,8 +28,16 @@ class HoneypotSimulator:
     Runtime honeypot detection via transaction simulation
     """
     
-    # Uniswap V2 Router (most common DEX)
-    UNISWAP_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+    # Multiple DEX Routers to check for liquidity (Ethereum mainnet)
+    ROUTERS = {
+        'Uniswap V2': "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        'Sushiswap': "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
+        'Shibaswap': "0x03f7724180AA6b939894B5Ca4314783B0b36b329",
+        'Fraxswap': "0xC14d550632db8592D1243Edc8B95b0Ad06703867",
+        'Defiswap': "0xCeB90E4C17d626BE0fACd78b79c9c87d7ca181b3",
+        'Uniswap V3': "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+    }
+    UNISWAP_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"  # Default fallback
     WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
     
     # Minimal ABIs for interaction
@@ -68,6 +76,33 @@ class HoneypotSimulator:
             ],
             "name": "swapExactETHForTokensSupportingFeeOnTransferTokens",
             "outputs": [],
+            "stateMutability": "payable",
+            "type": "function"
+        }
+    ]
+    
+    # Uniswap V3 Router ABI (different from V2!)
+    ROUTER_V3_ABI = [
+        {
+            "inputs": [
+                {
+                    "components": [
+                        {"internalType": "address", "name": "tokenIn", "type": "address"},
+                        {"internalType": "address", "name": "tokenOut", "type": "address"},
+                        {"internalType": "uint24", "name": "fee", "type": "uint24"},
+                        {"internalType": "address", "name": "recipient", "type": "address"},
+                        {"internalType": "uint256", "name": "deadline", "type": "uint256"},
+                        {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                        {"internalType": "uint256", "name": "amountOutMinimum", "type": "uint256"},
+                        {"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+                    ],
+                    "internalType": "struct ISwapRouter.ExactInputSingleParams",
+                    "name": "params",
+                    "type": "tuple"
+                }
+            ],
+            "name": "exactInputSingle",
+            "outputs": [{"internalType": "uint256", "name": "amountOut", "type": "uint256"}],
             "stateMutability": "payable",
             "type": "function"
         }
@@ -162,19 +197,51 @@ class HoneypotSimulator:
     
     def simulate_buy(self, token_address, amount_eth=0.01):
         """
-        Simulate buying tokens with ETH via Uniswap
+        Simulate buying tokens with ETH via multiple DEXes
         
         Args:
             token_address: Token contract address
             amount_eth: Amount of ETH to spend (default 0.01)
         
         Returns:
-            dict: {'success': bool, 'tokens_received': int, 'gas_used': int, 'error': str}
+            dict: {'success': bool, 'tokens_received': int, 'gas_used': int, 'error': str, 'dex_used': str}
         """
         self._log(f"\n[1] Simulating BUY: {amount_eth} ETH -> {token_address}")
         
+        # Try each DEX in order
+        last_error = None
+        for dex_name, router_address in self.ROUTERS.items():
+            self._log(f"    [*] Trying {dex_name}...")
+            result = self._try_buy_on_dex(token_address, amount_eth, router_address, dex_name)
+            
+            if result['success']:
+                result['dex_used'] = dex_name
+                self._log(f"    [✓] Successfully bought on {dex_name}")
+                return result
+            else:
+                last_error = result
+                self._log(f"    [✗] {dex_name} failed: {result.get('error', 'Unknown error')}")
+        
+        # All DEXes failed - return last error with info
+        if last_error:
+            last_error['tried_dexes'] = list(self.ROUTERS.keys())
+            last_error['error'] = f"No liquidity found on any DEX ({', '.join(self.ROUTERS.keys())})"
+        return last_error
+    
+    def _try_buy_on_dex(self, token_address, amount_eth, router_address, dex_name):
+        """
+        Try to buy tokens on a specific DEX
+        
+        Returns:
+            dict: {'success': bool, 'tokens_received': int, 'gas_used': int, 'error': str}
+        """
+        # Use V3 logic for Uniswap V3
+        if dex_name == 'Uniswap V3':
+            return self._try_buy_on_uniswap_v3(token_address, amount_eth, router_address)
+        
+        # V2-style DEXes
         router = self.w3.eth.contract(
-            address=Web3.to_checksum_address(self.UNISWAP_ROUTER),
+            address=Web3.to_checksum_address(router_address),
             abi=self.ROUTER_ABI
         )
         
@@ -217,11 +284,15 @@ class HoneypotSimulator:
                             'pattern': 'HONEYPOT_BALANCE_TRICK'
                         }
                     else:
-                        # Function doesn't exist or wrong ABI - truly not ERC20
+                        # Function doesn't exist or wrong ABI - SUSPICIOUS! Most honeypots have broken ERC20
+                        self._log(f"    ⚠ Does not implement standard ERC20 - likely honeypot!")
                         return {
                             'success': False,
-                            'error': 'Token does not implement standard ERC20 balanceOf function',
-                            'pattern': 'NON_STANDARD_TOKEN'
+                            'is_honeypot': True,  # Flag as honeypot
+                            'confidence': 80,  # High confidence - broken ERC20 is red flag
+                            'error': 'Token does not implement standard ERC20 balanceOf function - common honeypot tactic',
+                            'pattern': 'NON_STANDARD_TOKEN',
+                            'reason': 'Deliberately broken ERC20 implementation to prevent selling'
                         }
                 elif 'is contract deployed' in error_msg or 'not synced' in error_msg:
                     # Network/deployment issue
@@ -315,20 +386,141 @@ class HoneypotSimulator:
                 'pattern': pattern
             }
     
-    def simulate_sell(self, token_address):
+    def _try_buy_on_uniswap_v3(self, token_address, amount_eth, router_address):
+        """
+        Try to buy tokens on Uniswap V3 (different ABI and logic)
+        Tries multiple fee tiers: 3000 (0.3%), 10000 (1%), 500 (0.05%)
+        
+        Returns:
+            dict: {'success': bool, 'tokens_received': int, 'gas_used': int, 'error': str}
+        """
+        router = self.w3.eth.contract(
+            address=Web3.to_checksum_address(router_address),
+            abi=self.ROUTER_V3_ABI
+        )
+        
+        token = self.w3.eth.contract(
+            address=Web3.to_checksum_address(token_address),
+            abi=self.ERC20_ABI
+        )
+        
+        # Check balance before
+        try:
+            balance_before = token.functions.balanceOf(self.test_account.address).call()
+        except Exception as e:
+            error_msg = str(e)
+            if "return data: b''" in error_msg or "with return data: b''" in error_msg:
+                return {
+                    'success': False,
+                    'error': 'Token balanceOf() returns empty - likely a honeypot',
+                    'pattern': 'HONEYPOT_BALANCE_TRICK'
+                }
+            return {
+                'success': False,
+                'error': f'Failed to check token balance: {error_msg}',
+                'pattern': 'BALANCE_CHECK_FAILED'
+            }
+        
+        amount_in = self.w3.to_wei(amount_eth, 'ether')
+        deadline = int(time.time()) + 300
+        
+        # Try different fee tiers (V3 has multiple pools per pair)
+        fee_tiers = [3000, 10000, 500]  # 0.3%, 1%, 0.05%
+        last_error = None
+        
+        for fee in fee_tiers:
+            try:
+                self._log(f"    → Trying V3 fee tier: {fee/10000}%")
+                
+                params = {
+                    'tokenIn': Web3.to_checksum_address(self.WETH_ADDRESS),
+                    'tokenOut': Web3.to_checksum_address(token_address),
+                    'fee': fee,
+                    'recipient': self.test_account.address,
+                    'deadline': deadline,
+                    'amountIn': amount_in,
+                    'amountOutMinimum': 0,
+                    'sqrtPriceLimitX96': 0
+                }
+                
+                # Build transaction
+                tx = router.functions.exactInputSingle(params).build_transaction({
+                    'from': self.test_account.address,
+                    'value': amount_in,
+                    'gas': 500000,
+                    'gasPrice': self.w3.eth.gas_price,
+                    'nonce': self.w3.eth.get_transaction_count(self.test_account.address)
+                })
+                
+                # Sign and send
+                signed = self.test_account.sign_transaction(tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+                
+                # Wait for receipt
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                
+                # Check balance after
+                try:
+                    balance_after = token.functions.balanceOf(self.test_account.address).call()
+                    tokens_received = balance_after - balance_before
+                except Exception:
+                    tokens_received = 1  # Assume success if tx succeeded
+                
+                if receipt['status'] == 1 and tokens_received > 0:
+                    self._log(f"    ✓ V3 Buy successful on {fee/10000}% tier")
+                    if tokens_received > 1:
+                        self._log(f"    → Tokens received: {tokens_received}")
+                    self._log(f"    → Gas used: {receipt['gasUsed']}")
+                    
+                    return {
+                        'success': True,
+                        'tokens_received': tokens_received,
+                        'gas_used': receipt['gasUsed'],
+                        'tx_hash': tx_hash.hex()
+                    }
+                else:
+                    last_error = {
+                        'success': False,
+                        'error': 'Transaction succeeded but no tokens received',
+                        'pattern': 'BUY_NO_TOKENS'
+                    }
+            
+            except Exception as e:
+                error_msg = str(e)
+                last_error = {
+                    'success': False,
+                    'error': error_msg,
+                    'pattern': 'BUY_REVERTED' if 'revert' in error_msg.lower() else 'BUY_FAILED'
+                }
+                self._log(f"    ✗ V3 {fee/10000}% tier failed")
+        
+        # All fee tiers failed
+        self._log(f"    ✗ V3 Buy failed on all fee tiers")
+        return last_error if last_error else {
+            'success': False,
+            'error': 'No V3 pool found for any fee tier',
+            'pattern': 'BUY_NO_TOKENS'
+        }
+    
+    def simulate_sell(self, token_address, router_address=None):
         """
         Simulate selling tokens back to ETH
         
         Args:
             token_address: Token contract address
+            router_address: DEX router address to use (defaults to Uniswap V2)
         
         Returns:
             dict: {'success': bool, 'eth_received': int, 'gas_used': int, 'error': str}
         """
+        # Default to Uniswap V2 if not specified
+        if router_address is None:
+            router_address = self.ROUTERS['Uniswap V2']
+            
         self._log(f"\n[2] Simulating SELL: {token_address} -> ETH")
         
         router = self.w3.eth.contract(
-            address=Web3.to_checksum_address(self.UNISWAP_ROUTER),
+            address=Web3.to_checksum_address(router_address),
             abi=self.ROUTER_ABI
         )
         
@@ -352,7 +544,7 @@ class HoneypotSimulator:
         # Approve router to spend tokens
         try:
             approve_tx = token.functions.approve(
-                Web3.to_checksum_address(self.UNISWAP_ROUTER),
+                Web3.to_checksum_address(router_address),
                 balance
             ).build_transaction({
                 'from': self.test_account.address,
@@ -418,6 +610,17 @@ class HoneypotSimulator:
                 self._log(f"    ✓ Sell successful")
                 self._log(f"    → ETH received: {self.w3.from_wei(eth_received, 'ether')}")
                 self._log(f"    → Gas used: {receipt['gasUsed']}")
+                
+                # CRITICAL: Detect fake/manipulated return values (honeypot tactic)
+                max_realistic_eth = self.w3.to_wei(1000, 'ether')  # 1000 ETH is already suspicious
+                if eth_received > max_realistic_eth:
+                    self._log(f"    [!!!] FAKE VALUE DETECTED - impossibly high ETH: {self.w3.from_wei(eth_received, 'ether')}")
+                    return {
+                        'success': False,
+                        'error': f'Balance manipulation detected - returned {self.w3.from_wei(eth_received, "ether")} ETH (impossible)',
+                        'pattern': 'BALANCE_MANIPULATION',
+                        'fake_value': eth_received
+                    }
                 
                 # Check if we got reasonable amount back (detect high tax)
                 if eth_received < self.w3.to_wei(0.001, 'ether'):
@@ -628,12 +831,89 @@ class HoneypotSimulator:
         
         return findings
     
-    def analyze(self, token_address):
+    def is_erc20_token(self, token_address):
+        """
+        Check if address is an ERC20 token by verifying standard functions exist.
+        
+        Args:
+            token_address: Contract address to check
+        
+        Returns:
+            dict: {'is_token': bool, 'reason': str, 'missing_functions': list}
+        """
+        token = self.w3.eth.contract(
+            address=Web3.to_checksum_address(token_address),
+            abi=self.ERC20_ABI
+        )
+        
+        required_functions = ['totalSupply', 'balanceOf', 'decimals', 'symbol']
+        critical_functions = ['balanceOf', 'symbol']  # Must have these at minimum
+        missing = []
+        test_address = self.w3.eth.accounts[0] if self.w3.eth.accounts else '0x0000000000000000000000000000000000000001'
+        
+        for func_name in required_functions:
+            try:
+                func = getattr(token.functions, func_name)
+                # Test call - if it reverts, function doesn't exist properly
+                if func_name == 'balanceOf':
+                    result = func(test_address).call()
+                else:
+                    result = func().call()
+                    
+                # Additional check: decimals should return 0-18, symbol should be string
+                if func_name == 'decimals' and not isinstance(result, int):
+                    missing.append(func_name)
+                elif func_name == 'totalSupply' and not isinstance(result, int):
+                    missing.append(func_name)
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                # Catch all errors - any failure means it's not a standard token
+                self._log(f"    [DEBUG] {func_name}() failed: {error_msg[:100]}")
+                missing.append(func_name)
+        
+        # Check if critical functions are missing
+        critical_missing = [f for f in critical_functions if f in missing]
+        
+        if len(critical_missing) >= 2:
+            # Missing both balanceOf and symbol - definitely not a token
+            return {
+                'is_token': False,
+                'reason': 'Not an ERC20 token - missing core functions',
+                'missing_functions': missing,
+                'contract_type': 'SYSTEM_CONTRACT'  # Could be multisig, protocol, etc.
+            }
+        elif len(missing) >= 3:
+            # Missing 3+ functions total but has balanceOf or symbol - broken token
+            return {
+                'is_token': True,
+                'reason': 'Broken ERC20 implementation (missing some functions)',
+                'missing_functions': missing,
+                'contract_type': 'BROKEN_TOKEN'
+            }
+        elif len(missing) > 0:
+            # Missing 1-2 non-critical functions - likely old Solidity version (e.g., totalSupply as public var)
+            return {
+                'is_token': True,
+                'reason': 'Valid ERC20 token (older implementation)',
+                'missing_functions': missing,
+                'contract_type': 'ERC20_TOKEN'  # Treat as valid even with minor issues
+            }
+        else:
+            return {
+                'is_token': True,
+                'reason': 'Valid ERC20 interface',
+                'missing_functions': [],
+                'contract_type': 'ERC20_TOKEN'
+            }
+    
+    def analyze(self, token_address, goplus_data=None):
         """
         Full honeypot analysis: setup -> buy -> sell
         
         Args:
             token_address: Token contract address
+            goplus_data: Optional GoPlus Security API data to cross-reference
         
         Returns:
             dict: Complete analysis result
@@ -649,6 +929,32 @@ class HoneypotSimulator:
         }
         
         try:
+            # CRITICAL: Check if it's actually an ERC20 token FIRST
+            self._log(f"\n[0] Checking if address is an ERC20 token...")
+            token_check = self.is_erc20_token(token_address)
+            result['token_validation'] = token_check
+            
+            if not token_check['is_token']:
+                self._log(f"\n[✗] NOT A TOKEN - {token_check['reason']}")
+                self._log(f"    Missing functions: {', '.join(token_check['missing_functions'])}")
+                return {
+                    'token_address': token_address,
+                    'is_honeypot': False,
+                    'is_token': False,
+                    'confidence': 0,
+                    'reason': token_check['reason'],
+                    'contract_type': token_check['contract_type'],
+                    'missing_functions': token_check['missing_functions'],
+                    'pattern': 'NOT_A_TOKEN',
+                    'warning': 'This address is not a tradeable ERC20 token. It may be a system contract (ETH2 Deposit, multisig, DeFi protocol, etc.)',
+                    'recommendation': 'Cannot perform buy/sell simulation on non-token contracts'
+                }
+            elif token_check['contract_type'] == 'BROKEN_TOKEN':
+                self._log(f"\n[⚠] BROKEN TOKEN - Missing: {', '.join(token_check['missing_functions'])}")
+                # Flag as suspicious but continue to attempt simulation
+            else:
+                self._log(f"\n[✓] Valid ERC20 token detected")
+            
             # Setup test account
             self.setup_test_account()
             
@@ -659,14 +965,43 @@ class HoneypotSimulator:
             if not buy_result['success']:
                 pattern = buy_result.get('pattern', 'BUY_FAILED')
                 
-                # Distinguish between honeypots and non-token contracts
-                if pattern in ['NO_CONTRACT', 'NON_STANDARD_TOKEN', 'BALANCE_CHECK_FAILED', 'CONTRACT_NOT_ACCESSIBLE', 'BUY_NO_TOKENS']:
-                    self._log(f"\n[!] Not a standard tradeable token")
-                    result['is_honeypot'] = False
-                    result['confidence'] = 0
-                    result['reason'] = 'Not a standard ERC20 token - cannot simulate trading'
+                # Check if buy_result already flagged as honeypot (from my earlier fix)
+                if buy_result.get('is_honeypot'):
+                    self._log(f"\n[!!!] HONEYPOT DETECTED - {pattern}")
+                    result['is_honeypot'] = True
+                    result['confidence'] = buy_result.get('confidence', 80)
+                    result['reason'] = buy_result.get('reason', 'Broken ERC20 implementation')
                     result['pattern'] = pattern
-                    result['warning'] = 'This is not a tradeable token or does not follow ERC20 standard'
+                    return result
+                
+                # Distinguish between honeypots and non-token contracts
+                if pattern in ['NO_CONTRACT', 'BALANCE_CHECK_FAILED', 'CONTRACT_NOT_ACCESSIBLE', 'BUY_NO_TOKENS']:
+                    self._log(f"\n[!] Cannot simulate trading - may be frozen/paused or lack liquidity")
+                    
+                    # Get list of DEXes that were tried
+                    tried_dexes = buy_result.get('tried_dexes', ['Uniswap V2'])
+                    dex_list = ', '.join(tried_dexes)
+                    
+                    # If token has valid ERC20 interface, it's likely just frozen/paused (not malicious)
+                    if token_check.get('contract_type') == 'ERC20_TOKEN':
+                        result['is_honeypot'] = False
+                        result['confidence'] = 0
+                        result['tried_dexes'] = tried_dexes  # Pass through to frontend
+                        # More specific message based on the pattern
+                        if pattern == 'BUY_NO_TOKENS':
+                            result['reason'] = f'Cannot test - No liquidity pool found on {dex_list}. Token may trade on other DEXes or have no liquidity.'
+                            result['pattern'] = 'NO_LIQUIDITY'
+                            result['warning'] = f'No liquidity found on {dex_list}. This token may trade on other exchanges or have removed liquidity.'
+                        else:
+                            result['reason'] = f'Trading appears paused/frozen or lacks liquidity on {dex_list}. Valid ERC20 interface detected.'
+                            result['pattern'] = 'TRADING_PAUSED'
+                            result['warning'] = 'Trading appears to be paused, frozen, or lacks liquidity. This may be temporary.'
+                    else:
+                        result['is_honeypot'] = False
+                        result['confidence'] = 0
+                        result['reason'] = 'Not a standard ERC20 token - cannot simulate trading'
+                        result['pattern'] = pattern
+                        result['warning'] = 'This is not a tradeable token or does not follow ERC20 standard'
                 elif pattern == 'HONEYPOT_BALANCE_TRICK':
                     self._log(f"\n[!!!] HONEYPOT DETECTED - balanceOf() manipulation")
                     result['is_honeypot'] = True
@@ -683,14 +1018,43 @@ class HoneypotSimulator:
                 
                 return result
             
-            # Test SELL
-            sell_result = self.simulate_sell(token_address)
+            # Test SELL (use same DEX that worked for buy)
+            dex_used = buy_result.get('dex_used')
+            router_address = self.ROUTERS.get(dex_used, self.ROUTERS['Uniswap V2'])
+            sell_result = self.simulate_sell(token_address, router_address)
             result['sell_test'] = sell_result
             
-            if not sell_result['success']:
-                self._log(f"\n[!!!] HONEYPOT CONFIRMED - Cannot sell tokens!")
+            # Check for balance manipulation (fake return values)
+            if sell_result.get('pattern') == 'BALANCE_MANIPULATION':
+                self._log(f"\n[!!!] HONEYPOT CONFIRMED - Balance manipulation detected!")
                 result['is_honeypot'] = True
                 result['confidence'] = 99
+                result['reason'] = 'Contract uses balance manipulation to return fake transaction values'
+                result['pattern'] = 'BALANCE_MANIPULATION'
+                result['fake_value'] = sell_result.get('fake_value')
+                return result
+            
+            if not sell_result['success']:
+                self._log(f"\n[!!!] SELL FAILED - Investigating cause...")
+                
+                # CRITICAL FIX: Check GoPlus FIRST before labeling as honeypot
+                # Many legitimate tokens fail sell simulations due to liquidity/slippage/anti-bot
+                if goplus_data:
+                    goplus_honeypot = goplus_data.get('is_honeypot', False)
+                    if not goplus_honeypot:
+                        self._log(f"\n[✓] GoPlus confirms NOT A HONEYPOT")
+                        self._log(f"    → Sell failure likely due to: liquidity, slippage, or trading restrictions")
+                        result['is_honeypot'] = False
+                        result['confidence'] = 75  # Moderate confidence - simulation passed buy, GoPlus says safe
+                        result['reason'] = 'Token appears legitimate (verified by GoPlus) - sell failure may be due to insufficient liquidity, high slippage, or anti-bot protection'
+                        result['pattern'] = 'SELL_FAILED_BUT_LEGITIMATE'
+                        result['warning'] = sell_result.get('error', 'Sell transaction failed')
+                        return result
+                
+                # GoPlus also says honeypot OR no GoPlus data - proceed with honeypot analysis
+                self._log(f"\n[!!!] HONEYPOT SUSPECTED - Cannot sell tokens!")
+                result['is_honeypot'] = True
+                result['confidence'] = 90  # Reduced from 99 since we need to verify with source
                 result['reason'] = 'Sell transaction failed after successful buy'
                 result['pattern'] = sell_result.get('pattern', 'SELL_BLOCKED')
                 
@@ -733,6 +1097,18 @@ class HoneypotSimulator:
                 result['confidence'] = 90
                 result['reason'] = 'Sell tax exceeds 99% - effective honeypot'
                 result['pattern'] = 'EXTREME_SELL_TAX'
+                return result
+            
+            # CROSS-REFERENCE with GoPlus: If GoPlus says honeypot but simulation passed,
+            # trust GoPlus (they have more context: creator history, similar patterns, large tx restrictions)
+            if goplus_data and goplus_data.get('is_honeypot'):
+                self._log(f"\n[!!!] GoPlus flags as HONEYPOT despite passing simulation")
+                self._log(f"     → This may be a sophisticated honeypot that allows small amounts")
+                result['is_honeypot'] = True
+                result['confidence'] = 85  # High confidence but not 99 since simulation passed
+                result['reason'] = 'GoPlus Security detected honeypot behavior (may restrict large amounts or specific wallets)'
+                result['pattern'] = 'GOPLUS_HONEYPOT_FLAG'
+                result['goplus_context'] = goplus_data.get('flags', [])
                 return result
             
             # Both succeeded - likely safe

@@ -9,7 +9,14 @@ Web3 Risk Guard is a multi-layered Ethereum security system consisting of:
 3. **React Landing Page** - Public-facing scanner interface with dApp simulation
 4. **ML Training Pipeline** - Model training on verified fraud cases
 
-**Key Insight**: The system uses **context-aware scoring** - combining ML predictions, dApp runtime simulation, and code analysis. Trusted domains (Uniswap, Aave, etc.) verified safe by simulation skip detailed code analysis to eliminate false positives.
+**Core Philosophy**: The system uses **context-aware scoring** to eliminate false positives - combining ML predictions (Random Forest), dApp runtime simulation, and pattern-based code analysis. Trusted domains (Uniswap, Aave, etc.) verified safe by simulation skip detailed code analysis entirely.
+
+**Technology Stack**:
+
+- Extension: Vanilla JS (manifest v3), Chrome Extensions API
+- Backend: Flask 3.0, scikit-learn 1.4, BeautifulSoup4, Playwright (optional)
+- Frontend: React 19, Vite 7, Three.js, Framer Motion, React Router
+- ML: Random Forest (667 verified fraud cases), StandardScaler normalization
 
 ## Architecture & Data Flow
 
@@ -79,11 +86,40 @@ python train_website_model.py  # Trains website_model.pkl for URL detection
 ### Testing API Endpoints
 
 ```powershell
-# Address scoring
-Invoke-RestMethod "http://localhost:5000/score/0xYourAddress"
+# Address scoring (returns ML score, GoPlus data, darklist check)
+Invoke-RestMethod "http://localhost:5000/score/0x6982508145454Ce325dDbE47a25d4ec3d2311933"
 
-# Website analysis (with extended timeout for Playwright)
+# Website phishing detection (ML model + typosquat + basic code scan)
+Invoke-RestMethod "http://localhost:5000/site?url=https://app.uniswap.org"
+
+# dApp simulation (runtime behavior analysis)
+Invoke-RestMethod "http://localhost:5000/simulate-dapp?url=https://app.uniswap.org"
+
+# Browser-based analysis (Playwright - with extended timeout)
 Invoke-RestMethod "http://localhost:5000/analyze-browser?url=https://example.com" -TimeoutSec 120
+
+# With simulation context (context-aware filtering)
+Invoke-RestMethod "http://localhost:5000/analyze-browser?url=https://app.uniswap.org&simulation_is_safe=true&simulation_confidence=95"
+
+# GoPlus raw data
+Invoke-RestMethod "http://localhost:5000/goplus/0x6982508145454Ce325dDbE47a25d4ec3d2311933"
+
+# Debug feature vector (for ML troubleshooting)
+Invoke-RestMethod "http://localhost:5000/debug/0x6982508145454Ce325dDbE47a25d4ec3d2311933"
+```
+
+### Testing Smart Contract Analysis
+
+```powershell
+# Test known malicious contracts
+cd d:\University\FYP
+python test_malicious_contracts.py
+
+# Test specific contract with detailed output
+python test_contract_direct.py
+
+# Test pattern detection (30+ malicious patterns)
+python test_pattern_detection.py
 ```
 
 ## Critical Conventions
@@ -126,12 +162,18 @@ chrome.runtime.sendMessage({ type: "GET_LATEST", tabId })
 
 **Critical Pattern Files**:
 
-- `code_analyzer.py` lines 44-78: TRUSTED_DEFI_DOMAINS list (25+ verified DeFi sites)
-- `code_analyzer.py` lines 80-350: DRAINER_PATTERNS dictionary with severity/category/legit_use flags
-- `code_analyzer.py` lines 105-150: SUSPICIOUS_COMBINATIONS for behavioral pattern learning
+- `code_analyzer.py` lines 44-78: **TRUSTED_DEFI_DOMAINS** list (25+ verified DeFi sites + major non-crypto sites)
+- `code_analyzer.py` lines 80-115: **TRUSTED_CDN_DOMAINS** (Google Analytics, CDNs, Stripe - never flag)
+- `code_analyzer.py` lines 120-350: **DRAINER_PATTERNS** dictionary with severity/category/legit_use flags
+  - Known drainer kits: Inferno, Pink, Angel/Venom
+  - Dangerous patterns: eth_sign, private key inputs, setApprovalForAll
+  - **legit_use flag**: Patterns that appear in legitimate dApps (e.g., permit signatures)
+- `code_analyzer.py` lines 352-450: **SUSPICIOUS_COMBINATIONS** for behavioral pattern learning
+  - Detects multiple weak signals together (e.g., approval + obfuscation + auto-execution)
 - `code_analyzer.py` lines 572-578: Category-based filtering (only show "Known Drainer Kit" + "Key Theft" on trusted domains)
-- `code_analyzer.py` lines 708-713: Skip logic - trusted + safe simulation returns immediately
-- `browser_analyzer.py` lines 208-219: Skip logic - same pattern as code_analyzer
+- `code_analyzer.py` lines 708-713: **Skip logic** - trusted + safe simulation returns CLEAN with 0 findings
+- `browser_analyzer.py` lines 208-219: Same skip logic as code_analyzer (DRY principle maintained)
+- `code_analyzer.py` lines 780-863: **ERC20 false positive elimination** - recognizes standard functions (\_transfer, \_burn, \_mint)
 
 ## Key Files & Their Roles
 
@@ -167,7 +209,85 @@ chrome.runtime.sendMessage({ type: "GET_LATEST", tabId })
 
 ## Debugging Tips
 
-- Extension logs: Browser DevTools Console (filter by `[W3RG]`)
-- Backend logs: Terminal running `python api.py` shows `[DEBUG]`, `[ERROR]` prefixed logs
-- Feature debugging: `/debug/<address>` endpoint returns full feature vector
-- Model visualization: `ml/visualize_model.py` generates feature importance plots
+- **Extension logs**: Browser DevTools Console (filter by `[W3RG]`)
+- **Backend logs**: Terminal running `python api.py` shows `[DEBUG]`, `[ERROR]` prefixed logs
+- **Feature debugging**: `/debug/<address>` endpoint returns full feature vector with explanations
+- **Model visualization**: `ml/visualize_model.py` generates feature importance bar charts
+- **Code analysis testing**: Use test files like `test_code_analyzer.ps1`, `test_pattern_detection.py`
+- **Contract testing**: `test_malicious_contracts.py` tests 5 known malicious contracts
+- **ML cache**: Clear `mlScoreCache` in background.js for fresh API calls (5-min TTL)
+
+## Environment Setup
+
+### Required Environment Variables
+
+```bash
+# backend/.env (required for contract source analysis)
+ETHERSCAN_API_KEY=your_key_here  # Free from etherscan.io
+```
+
+### Optional Dependencies
+
+```bash
+# For browser_analyzer.py (anti-scraping websites)
+pip install playwright
+playwright install chromium
+```
+
+Without Playwright, system falls back to code_analyzer.py (HTTP-only analysis).
+
+## File Modification Watchers
+
+**CRITICAL**: Flask runs with auto-reload, BUT pattern changes require manual restart:
+
+1. **Pattern Files** (code_analyzer.py, browser_analyzer.py):
+
+   - Edit DRAINER_PATTERNS, TRUSTED_DEFI_DOMAINS, SUSPICIOUS_COMBINATIONS
+   - Press Ctrl+C in backend terminal
+   - Restart: `python api.py`
+
+2. **ML Models** (model_v2.pkl, website_model.pkl, scaler_v2.pkl):
+
+   - Auto-loaded on first API request
+   - Flask restart NOT required
+
+3. **Extension Files** (background.js, popup.js, content.js, inpage.js):
+   - Click extension reload button in chrome://extensions
+   - OR remove and re-add unpacked extension
+
+## Common Error Resolutions
+
+### "Expected 15 features, got X"
+
+**Cause**: Feature computation mismatch between training and inference
+
+**Fix**:
+
+1. Check `ml/features_v2.json` feature order
+2. Update `backend/api.py::compute_features()` to match exact order
+3. Retrain model: `cd ml && python train_real_model.py`
+
+### "Etherscan API V1 endpoint failed"
+
+**Cause**: Using deprecated V1 API without chainid parameter
+
+**Fix**: Always include `chainid: 1` in Etherscan requests (api.py lines 800-850)
+
+### Playwright Timeout (60s+)
+
+**Expected behavior** for complex dApps. Use extended timeout in PowerShell:
+
+```powershell
+Invoke-RestMethod "http://localhost:5000/analyze-browser?url=https://example.com" -TimeoutSec 120
+```
+
+### Extension Not Detecting Wallet Interactions
+
+**Cause**: inpage.js not injecting into window.ethereum
+
+**Debug Steps**:
+
+1. Check manifest.json: `"web_accessible_resources"` includes `inpage.js`
+2. Open DevTools → Console → filter `[W3RG]`
+3. Verify `content.js` logs show injection
+4. Check `window.__W3RG__` exists in page console

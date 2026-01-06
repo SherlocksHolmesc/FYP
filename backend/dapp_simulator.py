@@ -220,9 +220,11 @@ class DAppSimulator:
         trusted_domains = [
             'uniswap.org', 'app.uniswap.org', 'interface.gateway.uniswap.org',
             'aave.com', 'compound.finance', 'curve.fi',
+            'metamask.io', 'app.metamask.io', 'portfolio.metamask.io',  # MetaMask
+            'trustwallet.com', 'rainbow.me', 'coinbase.com', 'wallet.coinbase.com',  # Wallets
             'sentry.io', 'amplitude.com', 'segment.com',  # Analytics
             'walletconnect.org', 'walletconnect.com',  # WalletConnect protocol
-            'trustwallet.com', 'github.com', 'githubusercontent.com',  # Asset repos
+            'github.com', 'githubusercontent.com',  # Asset repos
             'google-analytics.com', 'googletagmanager.com'  # Analytics
         ]
         
@@ -243,14 +245,33 @@ class DAppSimulator:
             # Check for ACTUAL data exfiltration (sending private keys, seeds, etc.)
             if request.method == 'POST' and request.post_data:
                 try:
-                    data_lower = request.post_data.lower()
-                    # High-confidence malicious patterns
-                    if any(word in data_lower for word in ['privatekey', 'private_key', 'mnemonic', 'seed_phrase', 'seedphrase']):
-                        suspicious_requests.append({
-                            'type': 'PRIVATE_KEY_EXFILTRATION',
-                            'url': url,
-                            'description': 'Attempting to send private keys/seeds to external server!'
-                        })
+                    data = request.post_data
+                    data_lower = data.lower()
+                    
+                    # Look for ACTUAL hex private keys (64 chars) being sent
+                    # Not just field names or error messages mentioning "privatekey"
+                    import re
+                    
+                    # Pattern: looks for actual private key values (0x + 64 hex chars)
+                    private_key_pattern = r'["\']?(0x)?[a-fA-F0-9]{64}["\']?'
+                    
+                    # Only flag if we find suspicious terms AND actual hex values
+                    suspicious_terms = ['privatekey', 'private_key', 'mnemonic', 'seed_phrase', 'seedphrase']
+                    has_suspicious_term = any(term in data_lower for term in suspicious_terms)
+                    
+                    if has_suspicious_term:
+                        # Check if there's an ACTUAL private key value (not just the word)
+                        hex_matches = re.findall(private_key_pattern, data)
+                        
+                        # Filter out common false positives (empty strings, repeated chars)
+                        real_keys = [m for m in hex_matches if len(set(m.replace('0x', ''))) > 5]
+                        
+                        if real_keys:
+                            suspicious_requests.append({
+                                'type': 'PRIVATE_KEY_EXFILTRATION',
+                                'url': url,
+                                'description': 'Attempting to send private keys/seeds to external server!'
+                            })
                 except:
                     pass
             
@@ -387,6 +408,25 @@ class DAppSimulator:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
+        
+        # Decode punycode (IDN homograph attack detection)
+        original_domain = domain
+        try:
+            if domain.startswith('xn--') or 'xn--' in domain:
+                # Decode punycode to Unicode
+                domain = domain.encode('ascii').decode('idna')
+                self._log(f"[PUNYCODE] Decoded {original_domain} → {domain}")
+                
+                # Flag punycode domains as suspicious
+                threats.append({
+                    'type': 'PUNYCODE_ATTACK',
+                    'severity': 'CRITICAL',
+                    'confidence': 95,
+                    'description': 'IDN Homograph Attack detected - Domain uses punycode to impersonate legitimate site',
+                    'evidence': f'Punycode domain "{original_domain}" decodes to "{domain}"'
+                })
+        except Exception as e:
+            self._log(f"[WARN] Failed to decode punycode: {e}")
         
         # Known legitimate brands
         legitimate_brands = {

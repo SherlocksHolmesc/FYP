@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>GuardChain - Icon Generator</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #0a0b14;
+        color: #ffffff;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+      }
+      h1 {
+        background: linear-gradient(135deg, #22c55e, #06b6d4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .preview {
+        display: flex;
+        gap: 30px;
+        background: #12131f;
+        padding: 30px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .icon-box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      canvas {
+        border: 2px solid #22c55e;
+        border-radius: 8px;
+      }
+      button {
+        background: linear-gradient(135deg, #22c55e, #06b6d4);
+        border: none;
+        color: #0a0b14;
+        padding: 12px 24px;
+        font-size: 14px;
+        font-weight: 600;
+        border-radius: 6px;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      button:hover {
+        opacity: 0.9;
+        transform: translateY(-2px);
+      }
+      .instructions {
+        background: #12131f;
+        padding: 20px;
+        border-radius: 8px;
+        border-left: 4px solid #22c55e;
+        max-width: 600px;
+        margin-top: 20px;
+      }
+      .success {
+        color: #22c55e;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🛡️ GuardChain Icon Generator</h1>
+
+    <div class="preview">
+      <div class="icon-box">
+        <canvas id="icon16" width="16" height="16"></canvas>
+        <span>16x16</span>
+      </div>
+      <div class="icon-box">
+        <canvas id="icon48" width="48" height="48"></canvas>
+        <span>48x48</span>
+      </div>
+      <div class="icon-box">
+        <canvas id="icon128" width="128" height="128"></canvas>
+        <span>128x128</span>
+      </div>
+    </div>
+
+    <button onclick="downloadAll()">📥 Download All Icons</button>
+
+    <div class="instructions">
+      <h3>Instructions:</h3>
+      <ol>
+        <li>Click "Download All Icons" button above</li>
+        <li>
+          Three PNG files will download: <code>icon16.png</code>,
+          <code>icon48.png</code>, <code>icon128.png</code>
+        </li>
+        <li>Move all 3 files to: <code>d:\University\FYP\</code></li>
+        <li>Reload extension in <code>chrome://extensions</code></li>
+        <li class="success">✅ Icons will now appear in notifications!</li>
+      </ol>
+    </div>
+
+    <script>
+      function drawShield(canvas, size) {
+        const ctx = canvas.getContext("2d");
+        const scale = size / 128;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, size, size);
+
+        // Background
+        ctx.fillStyle = "#0a0b14";
+        ctx.fillRect(0, 0, size, size);
+
+        // Shield gradient
+        const gradient = ctx.createLinearGradient(0, 0, size, size);
+        gradient.addColorStop(0, "#22c55e");
+        gradient.addColorStop(1, "#06b6d4");
+
+        ctx.save();
+        ctx.scale(scale, scale);
+
+        // Draw shield shape
+        ctx.beginPath();
+        ctx.moveTo(64, 20);
+        ctx.lineTo(90, 35);
+        ctx.lineTo(90, 65);
+        ctx.quadraticCurveTo(90, 95, 64, 108);
+        ctx.quadraticCurveTo(38, 95, 38, 65);
+        ctx.lineTo(38, 35);
+        ctx.closePath();
+
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Draw shield icon (checkmark for all sizes)
+        ctx.strokeStyle = "#0a0b14";
+        ctx.lineWidth = size >= 48 ? 6 : 3;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(50, 60);
+        ctx.lineTo(60, 70);
+        ctx.lineTo(78, 50);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      // Generate icons on load
+      window.onload = function () {
+        drawShield(document.getElementById("icon16"), 16);
+        drawShield(document.getElementById("icon48"), 48);
+        drawShield(document.getElementById("icon128"), 128);
+      };
+
+      function downloadCanvas(canvas, filename) {
+        const link = document.createElement("a");
+        link.download = filename;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      }
+
+      function downloadAll() {
+        setTimeout(
+          () => downloadCanvas(document.getElementById("icon16"), "icon16.png"),
+          100
+        );
+        setTimeout(
+          () => downloadCanvas(document.getElementById("icon48"), "icon48.png"),
+          300
+        );
+        setTimeout(
+          () =>
+            downloadCanvas(document.getElementById("icon128"), "icon128.png"),
+          500
+        );
+
+        setTimeout(() => {
+          alert(
+            "✅ All icons downloaded!\n\nMove them to: d:\\University\\FYP\\\n\nThen reload your extension."
+          );
+        }, 800);
+      }
+    </script>
+  </body>
+</html>

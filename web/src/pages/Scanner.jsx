@@ -1839,17 +1839,35 @@ function Scanner() {
                           fontWeight: '700',
                           color: simulationResult.warning ? '#f59e0b' : '#22c55e'
                         }}>
-                          {simulationResult.warning ? 'Not a Tradeable Token' : 'No Honeypot Detected'}
+                          {simulationResult.pattern === 'WHITELISTED'
+                            ? '✓ Verified Legitimate Token'
+                            : simulationResult.pattern === 'NOT_A_TOKEN' 
+                              ? 'Not a Tradeable Token'
+                              : simulationResult.pattern === 'NO_LIQUIDITY'
+                                ? '💧 No Uniswap Liquidity'
+                              : simulationResult.pattern === 'TRADING_PAUSED'
+                                ? '⏸️ Trading Paused/Frozen'
+                              : simulationResult.warning 
+                                ? 'Trading Restrictions Detected' 
+                                : 'No Honeypot Detected'}
                         </div>
                         <div style={{ fontSize: '14px', opacity: 0.9, marginTop: '4px' }}>
-                          {simulationResult.warning 
-                            ? simulationResult.warning
-                            : `Live transaction test confirmed both buy and sell operations work correctly (${simulationResult.confidence}% confidence)`
+                          {simulationResult.pattern === 'WHITELISTED'
+                            ? 'This token is verified as legitimate on CoinGecko or major exchanges. Simulation skipped.'
+                            : simulationResult.pattern === 'NOT_A_TOKEN'
+                              ? `This contract does not implement standard ERC20 functions. ${simulationResult.contract_type === 'SYSTEM_CONTRACT' ? 'It appears to be a system contract, DeFi protocol, or multisig wallet.' : 'Cannot perform trading simulation.'}`
+                              : simulationResult.pattern === 'NO_LIQUIDITY'
+                                ? `No liquidity pool found on ${simulationResult.tried_dexes?.join(', ') || 'Uniswap V2, Sushiswap, Uniswap V3'}. This token may trade on other DEXes (Pancakeswap, 1inch, Curve) or have no active trading pairs. Check DexTools or DexScreener for liquidity on other exchanges.`
+                              : simulationResult.pattern === 'TRADING_PAUSED'
+                                ? 'This token has valid ERC20 interface but trading appears paused/frozen or lacks liquidity. This may be temporary or intentional by the contract owner.'
+                              : simulationResult.warning 
+                                ? simulationResult.warning
+                                : `Live transaction test confirmed both buy and sell operations work correctly (${simulationResult.confidence}% confidence)`
                           }
                         </div>
                       </div>
                     </div>
-                    {!simulationResult.warning && simulationResult.buy_test && simulationResult.sell_test && (
+                    {!simulationResult.warning && !simulationResult.whitelisted && simulationResult.buy_test && simulationResult.sell_test && (
                       <div style={{
                         display: 'grid',
                         gridTemplateColumns: '1fr 1fr',
@@ -1859,10 +1877,33 @@ function Scanner() {
                         borderRadius: '8px'
                       }}>
                         <div style={{ fontSize: '13px' }}>
-                          <strong>Buy Test:</strong> ✅ {simulationResult.buy_test?.tokens_received && `Got ${parseFloat(simulationResult.buy_test.tokens_received).toFixed(4)} tokens`}
+                          <strong>Buy Test:</strong> ✅ {simulationResult.buy_test?.note || (simulationResult.buy_test?.tokens_received && `Got ${parseFloat(simulationResult.buy_test.tokens_received).toFixed(4)} tokens`)}
                         </div>
                         <div style={{ fontSize: '13px' }}>
-                          <strong>Sell Test:</strong> ✅ {simulationResult.sell_test?.eth_received && `Got ${parseFloat(simulationResult.sell_test.eth_received).toFixed(6)} ETH`}
+                          <strong>Sell Test:</strong> ✅ {simulationResult.sell_test?.note || (simulationResult.sell_test?.eth_received && `Got ${(parseFloat(simulationResult.sell_test.eth_received) / 1e18).toFixed(6)} ETH`)}
+                        </div>
+                      </div>
+                    )}
+                    {simulationResult.whitelisted && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        background: 'rgba(34, 197, 94, 0.2)',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        border: '1px solid rgba(34, 197, 94, 0.3)'
+                      }}>
+                        <strong>✓ Whitelisted Token</strong>
+                        <div style={{ marginTop: '8px', opacity: 0.9 }}>
+                          This token has been manually verified as legitimate through:
+                          <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '20px' }}>
+                            <li>CoinGecko listing with verified contract address</li>
+                            <li>Trading volume on major decentralized exchanges (Uniswap, etc.)</li>
+                            <li>Community verification and holder count</li>
+                          </ul>
+                          <div style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
+                            Honeypot simulation was skipped for this verified token.
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1874,8 +1915,27 @@ function Scanner() {
                         borderRadius: '8px',
                         fontSize: '13px'
                       }}>
-                        <strong>Note:</strong> This address may be a smart contract (like ETH2 Deposit Contract, multisig wallet, or DeFi protocol) 
-                        rather than a standard ERC20 token. It cannot be traded on Uniswap.
+                        {simulationResult.pattern === 'NOT_A_TOKEN' ? (
+                          <>
+                            <strong>Note:</strong> This address is not a standard ERC20 token. Possible types:
+                            <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '20px' }}>
+                              <li>System contract (e.g., ETH2 Deposit Contract: 0x00000000219ab540356cBB839Cbe05303d7705Fa)</li>
+                              <li>Multisig wallet (Gnosis Safe, etc.)</li>
+                              <li>DeFi protocol contract (lending, AMM, vault)</li>
+                              <li>NFT contract (ERC721/ERC1155)</li>
+                              <li>Governance contract or DAO treasury</li>
+                            </ul>
+                            {simulationResult.missing_functions && simulationResult.missing_functions.length > 0 && (
+                              <div style={{ marginTop: '8px', fontSize: '12px', opacity: 0.8 }}>
+                                Missing ERC20 functions: {simulationResult.missing_functions.join(', ')}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <strong>Note:</strong> {simulationResult.warning}
+                          </>
+                        )}
                       </div>
                     )}
                   </motion.div>
@@ -2387,7 +2447,7 @@ function Scanner() {
                                             marginBottom: '12px'
                                           }}>
                                             <strong>⚠️ DO NOT CONNECT YOUR WALLET!</strong> Our runtime simulator loaded this site in a real browser with a mock wallet 
-                                            and detected <strong>{dappSimulationResult.threats?.length || 0} malicious behavior(s)</strong>.
+                                            and detected <strong>{(dappSimulationResult.risk_factors || dappSimulationResult.threats || []).length} malicious behavior(s)</strong>.
                                           </div>
                                           <div style={{
                                             display: 'inline-block',
@@ -2538,12 +2598,13 @@ function Scanner() {
                                     }))
                                     
                                     // Add dApp simulation threats to risk factors
-                                    const dappThreats = (dappSimulationResult?.threats || []).map(t => ({
+                                    const dappThreats = (dappSimulationResult?.risk_factors || dappSimulationResult?.threats || []).map(t => ({
                                       factor: t.type,
                                       description: t.description,
                                       severity: t.severity?.toLowerCase() || 'medium',
                                       value: t.evidence || 'Detected by runtime browser simulation',
-                                      type: 'dapp_simulation'
+                                      type: 'dapp_simulation',
+                                      confidence: t.confidence
                                     }))
                                     
                                     const allFactors = [...mlFactors, ...dappThreats].sort((a, b) => 
