@@ -440,36 +440,53 @@ class DAppSimulator:
             'sushiswap': ['sushi.com', 'app.sushi.com']
         }
         
-        # Suspicious TLDs commonly used in phishing
-        suspicious_tlds = ['.xyz', '.top', '.live', '.site', '.online', '.click', '.pw', '.tk', '.ml', '.ga', '.cf']
+        # Simple Levenshtein distance
+        def levenshtein(s1, s2):
+            if len(s1) < len(s2):
+                return levenshtein(s2, s1)
+            if len(s2) == 0:
+                return len(s1)
+            previous_row = range(len(s2) + 1)
+            for i, c1 in enumerate(s1):
+                current_row = [i + 1]
+                for j, c2 in enumerate(s2):
+                    insertions = previous_row[j + 1] + 1
+                    deletions = current_row[j] + 1
+                    substitutions = previous_row[j] + (c1 != c2)
+                    current_row.append(min(insertions, deletions, substitutions))
+                previous_row = current_row
+            return previous_row[-1]
         
-        # Check if domain contains brand name but uses wrong TLD
+        # Normalize domain by replacing common character substitutions
+        def normalize_domain(d):
+            d = d.replace('1', 'i').replace('0', 'o').replace('3', 'e').replace('5', 's')
+            d = d.replace('@', 'a').replace('$', 's').replace('!', 'i')
+            return d
+        
+        # Check if domain is similar to brand names
         for brand, legitimate_domains in legitimate_brands.items():
-            if brand in domain:
-                # Check if it's actually a legitimate domain
-                is_legitimate = any(legit_domain in domain for legit_domain in legitimate_domains)
-                
-                if not is_legitimate:
-                    # Check if using suspicious TLD
-                    uses_suspicious_tld = any(tld in domain for tld in suspicious_tlds)
-                    
-                    if uses_suspicious_tld:
-                        threats.append({
-                            'type': 'TYPOSQUATTING_CRITICAL',
-                            'severity': 'CRITICAL',
-                            'confidence': 99,
-                            'description': f'CRITICAL: Fake {brand.title()} site using suspicious domain',
-                            'evidence': f'Domain "{domain}" impersonates {brand.title()} (real: {", ".join(legitimate_domains[:2])})'
-                        })
-                    else:
-                        # Wrong TLD but not obviously suspicious
-                        threats.append({
-                            'type': 'TYPOSQUATTING_HIGH',
-                            'severity': 'HIGH',
-                            'confidence': 90,
-                            'description': f'Potential {brand.title()} impersonation',
-                            'evidence': f'Domain "{domain}" similar to {brand.title()} (real: {", ".join(legitimate_domains[:2])})'
-                        })
+            # Extract just the domain name without TLD for comparison
+            domain_name = domain.split('.')[0]  # "un1swap" from "un1swap.com"
+            
+            # Check if it's a legitimate domain first
+            is_legitimate = any(legit_domain == domain for legit_domain in legitimate_domains)
+            if is_legitimate:
+                continue
+            
+            # Normalize and check similarity
+            normalized_domain = normalize_domain(domain_name)
+            distance = levenshtein(normalized_domain, brand)
+            similarity_ratio = 1 - (distance / max(len(normalized_domain), len(brand)))
+            
+            # If highly similar (>70% match) or contains brand substring
+            if similarity_ratio >= 0.7 or brand in domain or normalized_domain == brand:
+                threats.append({
+                    'type': 'TYPOSQUATTING_CRITICAL',
+                    'severity': 'CRITICAL',
+                    'confidence': 99,
+                    'description': f'CRITICAL: Fake {brand.title()} site detected',
+                    'evidence': f'Domain "{domain}" impersonates {brand.title()} (real: {", ".join(legitimate_domains[:2])})'
+                })
         
         return threats
     
@@ -524,16 +541,40 @@ class DAppSimulator:
                 self._log("    ⚠ Timeout, continuing with domain-level analysis...")
             except Exception as e:
                 self._log(f"    ⚠ Load failed: {str(e)[:100]}")
-                # If we already have domain-level threats, continue anyway
+                # If we have domain-level threats, return them immediately
                 if threats:
-                    self._log("    → But domain threats detected, continuing...")
-                else:
-                    return {
-                        **result,
-                        'is_malicious': False,
-                        'error': f'Failed to load page: {str(e)}',
-                        'pattern': 'LOAD_FAILED'
-                    }
+                    self._log(f"    → Returning {len(threats)} domain threat(s) detected...")
+                    critical_threats = [t for t in threats if t.get('severity') == 'CRITICAL']
+                    high_threats = [t for t in threats if t.get('severity') == 'HIGH']
+                    
+                    if critical_threats:
+                        return {
+                            **result,
+                            'is_malicious': True,
+                            'confidence': max((t.get('confidence', 95) for t in critical_threats), default=95),
+                            'reason': f'Detected {len(critical_threats)} critical domain threat(s)',
+                            'threats': threats,
+                            'risk_factors': threats,
+                            'pattern': 'DOMAIN_THREAT'
+                        }
+                    elif high_threats:
+                        return {
+                            **result,
+                            'is_malicious': True,
+                            'confidence': max((t.get('confidence', 85) for t in high_threats), default=85),
+                            'reason': f'Detected {len(high_threats)} high-risk domain threat(s)',
+                            'threats': threats,
+                            'risk_factors': threats,
+                            'pattern': 'DOMAIN_THREAT'
+                        }
+                
+                # No domain threats detected
+                return {
+                    **result,
+                    'is_malicious': False,
+                    'error': f'Failed to load page: {str(e)}',
+                    'pattern': 'LOAD_FAILED'
+                }
             
             # Wait for any automatic wallet connection attempts
             self._log("\n[3] Monitoring for automatic interactions...")

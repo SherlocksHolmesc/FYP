@@ -1,8 +1,8 @@
 # Quick check of known honeypots
 $addresses = @(
-    @{name="Babyama (GoPlus cross-ref test)"; addr="0x8b9773e03e987bed942d1f9695fe6895395ca386"},
-    @{name="MommyMilkers"; addr="0x45dac6c8776e5eb1548d3cdcf0c5f6959e410c3a"},
-    @{name="Compromised 2"; addr="0x80e4f014c98320eab524ae16b0aaf1603f4dc01d"}
+    @{name = "Babyama (GoPlus cross-ref test)"; addr = "0x8b9773e03e987bed942d1f9695fe6895395ca386" },
+    @{name = "MommyMilkers"; addr = "0x45dac6c8776e5eb1548d3cdcf0c5f6959e410c3a" },
+    @{name = "Compromised 2"; addr = "0x80e4f014c98320eab524ae16b0aaf1603f4dc01d" }
 )
 
 Write-Host "`n╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
@@ -36,7 +36,8 @@ foreach ($item in $addresses) {
             Write-Host "  Sell Test: $sellStatus" -ForegroundColor Gray
         }
         
-    } catch {
+    }
+    catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
     }
     
