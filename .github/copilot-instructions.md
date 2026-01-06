@@ -39,6 +39,7 @@ User Wallet Interaction → inpage.js (intercepts window.ethereum)
 - `/debug/<address>` - Full feature breakdown for model debugging
 
 **Context-Aware Architecture**:
+
 1. ML model predicts phishing (website_model.pkl)
 2. dApp simulator checks runtime behavior (dapp_simulator.py - 100% typosquatting accuracy)
 3. Code analyzer scans JavaScript/Solidity (code_analyzer.py + browser_analyzer.py)
@@ -124,6 +125,7 @@ chrome.runtime.sendMessage({ type: "GET_LATEST", tabId })
 3. **Skip Logic**: Both analyzers check if `trusted domain + safe simulation (>=85% confidence)` → return CLEAN with 0 findings
 
 **Critical Pattern Files**:
+
 - `code_analyzer.py` lines 44-78: TRUSTED_DEFI_DOMAINS list (25+ verified DeFi sites)
 - `code_analyzer.py` lines 80-350: DRAINER_PATTERNS dictionary with severity/category/legit_use flags
 - `code_analyzer.py` lines 105-150: SUSPICIOUS_COMBINATIONS for behavioral pattern learning
