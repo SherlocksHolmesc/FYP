@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./icons/can-u-make-it-like-svg.svg" alt="Web3 Risk Guard Logo" width="200" height="200" style="margin: 30px 0;">
+  <img src="./icons/can-u-make-it-like-svg.svg" alt="Web3 Risk Guard Logo" width="900" height="900" style="margin: 30px 0;">
 </div>
 
 <h1 align="center">GuardChain</h1>
