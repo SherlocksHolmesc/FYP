@@ -137,7 +137,7 @@ DRAINER_PATTERNS = {
         'severity': 'critical',
         'description': 'Uses eth_sign which can sign arbitrary data. High risk of asset theft.',
         'category': 'Dangerous Signature',
-        'legit_use': False
+        'legit_use': True  # Legitimate dApps like Uniswap use this for signatures
     },
     'hidden_approval_all': {
         'pattern': r'setApprovalForAll\s*\([^)]*true[^)]*\)(?!.*(?:opensea|blur|uniswap|legitimate))',
@@ -278,7 +278,7 @@ DRAINER_PATTERNS = {
         'severity': 'critical',
         'description': 'Recovery scam keywords detected. NO ONE can recover stolen crypto!',
         'category': 'Recovery Scam',
-        'legit_use': False
+        'legit_use': True  # Help docs may mention "recover lost funds" as warnings
     },
     'pump_dump_signals': {
         'pattern': r'(?:pump|moon|100x|1000x).*(?:signal|alert|call)|(?:insider|whale).*(?:tip|info|signal)',
@@ -463,6 +463,94 @@ def is_trusted_cdn(url_or_domain):
         return False
 
 
+# Behavioral Pattern Learning - Suspicious pattern combinations
+SUSPICIOUS_COMBINATIONS = {
+    # Critical combinations (3+ patterns)
+    'drainer_combo_critical': {
+        'patterns': ['wallet_connect_pattern', 'obfuscation_eval', 'external_data_exfil'],
+        'min_patterns': 3,
+        'severity': 'critical',
+        'description': 'Highly suspicious: Wallet connection + obfuscation + data exfiltration'
+    },
+    'approval_drainer': {
+        'patterns': ['approve_unlimited', 'obfuscation_eval', 'external_data_exfil'],
+        'min_patterns': 3,
+        'severity': 'critical',
+        'description': 'Approval drainer pattern: Unlimited approval + obfuscation + external call'
+    },
+    'clipboard_hijack_combo': {
+        'patterns': ['clipboard_address_swap', 'obfuscation_eval'],
+        'min_patterns': 2,
+        'severity': 'critical',
+        'description': 'Clipboard hijacking with obfuscation detected'
+    },
+    
+    # High severity combinations (2 patterns)
+    'permit_drainer': {
+        'patterns': ['permit_signature', 'obfuscation_eval'],
+        'min_patterns': 2,
+        'severity': 'high',
+        'description': 'Suspicious: Permit signature with code obfuscation'
+    },
+    'approval_with_obfuscation': {
+        'patterns': ['approve_unlimited', 'suspicious_hex_payload'],
+        'min_patterns': 2,
+        'severity': 'high',
+        'description': 'Suspicious: Token approval with obfuscated payload'
+    },
+    'fake_claim_with_urgency': {
+        'patterns': ['fake_claim_airdrop', 'fake_countdown_urgency'],
+        'min_patterns': 2,
+        'severity': 'high',
+        'description': 'Scam tactics: Fake airdrop claim with urgency tactics'
+    }
+}
+
+
+def detect_pattern_combinations(all_findings):
+    """
+    Detect suspicious combinations of patterns (Behavioral Pattern Learning).
+    Returns additional high-severity findings based on pattern combinations.
+    """
+    if len(all_findings) < 2:
+        return []
+    
+    # Extract pattern names from findings
+    detected_patterns = set(f['pattern'] for f in all_findings)
+    
+    combination_findings = []
+    
+    for combo_name, combo_info in SUSPICIOUS_COMBINATIONS.items():
+        required_patterns = set(combo_info['patterns'])
+        matched_patterns = required_patterns & detected_patterns
+        
+        # Check if we have enough patterns for this combination
+        if len(matched_patterns) >= combo_info['min_patterns']:
+            # Find the findings that are part of this combination
+            related_findings = [f for f in all_findings if f['pattern'] in matched_patterns]
+            
+            # Create a combined finding
+            combined_finding = {
+                'pattern': combo_name,
+                'category': 'Behavioral Pattern',
+                'severity': combo_info['severity'],
+                'description': combo_info['description'],
+                'line_number': min(f['line_number'] for f in related_findings),
+                'matched_code': f"PATTERN COMBINATION: {', '.join(sorted(matched_patterns))}",
+                'context': f"Multiple suspicious patterns detected:\n" + "\n".join(
+                    f"  - {f['category']}: {f['pattern']}" for f in related_findings
+                ),
+                'source': 'pattern_combination',
+                'legit_use': False,
+                'is_combination': True,
+                'matched_patterns': list(matched_patterns)
+            }
+            
+            combination_findings.append(combined_finding)
+    
+    return combination_findings
+
+
 def analyze_code_for_drainers(code, source_name='inline', is_trusted=False):
     """
     Analyze JavaScript code for drainer patterns.
@@ -486,9 +574,11 @@ def analyze_code_for_drainers(code, source_name='inline', is_trusted=False):
         if is_trusted and pattern_info.get('legit_use', False):
             continue
         
-        # On trusted domains, only report critical issues
-        if is_trusted and pattern_info['severity'] not in ['critical', 'high']:
-            continue
+        # On trusted domains, ONLY report known drainer kits (not common DeFi patterns)
+        if is_trusted:
+            # Only show patterns from "Known Drainer Kit" and "Key Theft" categories
+            if pattern_info['category'] not in ['Known Drainer Kit', 'Key Theft']:
+                continue
             
         try:
             regex = re.compile(pattern_info['pattern'], re.IGNORECASE | re.MULTILINE)
@@ -565,10 +655,15 @@ def check_suspicious_externals(external_scripts):
     return suspicious
 
 
-def analyze_website(url):
+def analyze_website(url, simulation_result=None):
     """
     Main function to analyze a website for drainer code.
-    Returns comprehensive analysis results.
+    
+    Args:
+        url: Website URL to analyze
+        simulation_result: Optional dApp simulation result for context-aware scoring
+        
+    Returns comprehensive analysis results with intelligent filtering.
     """
     print(f"[CODE ANALYZER] Analyzing: {url}")
     
@@ -577,12 +672,24 @@ def analyze_website(url):
     if trusted:
         print(f"[CODE ANALYZER] Trusted domain detected - reducing false positives")
     
+    # Context-Aware Scoring: Check simulation result
+    simulation_is_safe = False
+    if simulation_result:
+        is_malicious = simulation_result.get('is_malicious', False)
+        confidence = simulation_result.get('confidence', 0)
+        simulation_is_safe = (not is_malicious) and (confidence >= 85)
+        
+        if simulation_is_safe:
+            print(f"[CODE ANALYZER] Simulation marked as SAFE ({confidence}% confidence) - reducing code analysis")
+    
     result = {
         'url': url,
         'analyzed_at': time.strftime('%Y-%m-%d %H:%M:%S'),
         'status': 'success',
         'is_trusted_domain': trusted,
+        'simulation_is_safe': simulation_is_safe,
         'findings': [],
+        'pattern_combinations': [],
         'summary': {
             'total_findings': 0,
             'critical': 0,
@@ -595,6 +702,13 @@ def analyze_website(url):
         'suspicious_externals': [],
         'error': None
     }
+    
+    # Context-Aware: If both trusted AND simulation says safe, skip detailed analysis
+    if trusted and simulation_is_safe:
+        result['risk_level'] = 'CLEAN'
+        result['note'] = 'Trusted domain verified safe by runtime simulation - skipping code analysis'
+        print(f"[CODE ANALYZER] Skipping analysis - trusted domain + safe simulation")
+        return result
     
     # Fetch website code
     website_data = fetch_website_code(url)
@@ -643,6 +757,32 @@ def analyze_website(url):
         website_data.get('external_scripts', [])
     )
     
+    # BEHAVIORAL PATTERN LEARNING: Detect suspicious combinations
+    combination_findings = detect_pattern_combinations(all_findings)
+    result['pattern_combinations'] = combination_findings
+    
+    # Merge combination findings with regular findings
+    all_findings.extend(combination_findings)
+    
+    # Context-Aware Filtering: If simulation says safe, only keep critical+high
+    if simulation_is_safe:
+        all_findings = [f for f in all_findings if f['severity'] in ['critical', 'high']]
+        print(f"[CODE ANALYZER] Filtered to critical/high only (simulation safe)")
+    
+    # Context-Aware Filtering: Require multiple patterns for untrusted domains
+    if not trusted and not simulation_is_safe:
+        # Count patterns by severity
+        severity_counts = {'critical': 0, 'high': 0, 'medium': 0}
+        for f in all_findings:
+            if f['severity'] in severity_counts:
+                severity_counts[f['severity']] += 1
+        
+        # If only 1 medium/high finding and no critical, it might be false positive
+        # Keep it but note the low confidence
+        if severity_counts['critical'] == 0 and severity_counts['high'] <= 1:
+            result['low_confidence'] = True
+            print(f"[CODE ANALYZER] Low confidence - single pattern detected, no combinations")
+    
     # Sort findings by severity
     severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
     all_findings.sort(key=lambda x: severity_order.get(x['severity'], 5))
@@ -657,16 +797,25 @@ def analyze_website(url):
             result['summary'][sev] += 1
     result['summary']['total_findings'] = len(all_findings)
     
-    # Determine overall risk level
-    # For trusted domains, only critical findings matter
+    # Determine overall risk level with context awareness
     if trusted:
+        # For trusted domains, only critical findings matter
         if result['summary']['critical'] > 0:
             result['risk_level'] = 'CRITICAL'
         else:
             result['risk_level'] = 'CLEAN'
             result['note'] = 'Trusted domain - normal DeFi patterns detected but not flagged'
-    else:
+    elif simulation_is_safe:
+        # If simulation says safe, require critical evidence to override
         if result['summary']['critical'] > 0:
+            result['risk_level'] = 'HIGH'  # Downgrade from CRITICAL
+            result['note'] = 'Simulation marked safe but code patterns detected - manual review suggested'
+        else:
+            result['risk_level'] = 'CLEAN'
+            result['note'] = 'Verified safe by runtime simulation'
+    else:
+        # Standard risk calculation for unknown/untrusted domains
+        if result['summary']['critical'] > 0 or len(combination_findings) > 0:
             result['risk_level'] = 'CRITICAL'
         elif result['summary']['high'] > 0:
             result['risk_level'] = 'HIGH'
@@ -677,7 +826,15 @@ def analyze_website(url):
         else:
             result['risk_level'] = 'CLEAN'
     
-    print(f"[CODE ANALYZER] Risk: {result['risk_level']} | Found {len(all_findings)} issues (Critical: {result['summary']['critical']}, High: {result['summary']['high']})")
+    # Add pattern combination note if detected
+    if len(combination_findings) > 0:
+        combo_note = f"{len(combination_findings)} suspicious pattern combination(s) detected"
+        if 'note' in result:
+            result['note'] += f" | {combo_note}"
+        else:
+            result['note'] = combo_note
+    
+    print(f"[CODE ANALYZER] Risk: {result['risk_level']} | Found {len(all_findings)} issues (Critical: {result['summary']['critical']}, High: {result['summary']['high']}, Combinations: {len(combination_findings)})")
     
     return result
 

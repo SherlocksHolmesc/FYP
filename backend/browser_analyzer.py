@@ -198,15 +198,26 @@ def analyze_code_for_drainers(code, source_name='inline', is_trusted=False):
     return findings
 
 
-async def analyze_website_browser(url):
+async def analyze_website_browser(url, simulation_result=None):
     """
     Main function to analyze a website using browser rendering.
+    
+    Args:
+        url: Website URL to analyze
+        simulation_result: Optional dApp simulation result for context-aware scoring
     """
     print(f"[BROWSER ANALYZER] Loading: {url}")
     
     trusted = is_trusted_domain(url)
     if trusted:
         print(f"[BROWSER ANALYZER] Trusted domain - reducing false positives")
+    
+    # Context-Aware: Check simulation result FIRST
+    simulation_is_safe = False
+    if simulation_result:
+        is_malicious = simulation_result.get('is_malicious', False)
+        confidence = simulation_result.get('confidence', 0)
+        simulation_is_safe = (not is_malicious) and (confidence >= 85)
     
     result = {
         'url': url,
@@ -226,6 +237,13 @@ async def analyze_website_browser(url):
         'scripts_analyzed': 0,
         'error': None
     }
+    
+    # Context-Aware: If both trusted AND simulation says safe, skip detailed analysis
+    if trusted and simulation_is_safe:
+        result['risk_level'] = 'CLEAN'
+        result['note'] = 'Trusted domain verified safe by runtime simulation - skipping code analysis'
+        print(f"[BROWSER ANALYZER] Skipping analysis - trusted domain + safe simulation")
+        return result
     
     # Fetch with browser
     website_data = await fetch_with_browser(url)
@@ -269,6 +287,25 @@ async def analyze_website_browser(url):
         html_findings = [f for f in html_findings if f['severity'] == 'critical']
         all_findings.extend(html_findings)
     
+    # BEHAVIORAL PATTERN LEARNING: Import and use the function from code_analyzer
+    from code_analyzer import detect_pattern_combinations
+    combination_findings = detect_pattern_combinations(all_findings)
+    all_findings.extend(combination_findings)
+    result['pattern_combinations'] = len(combination_findings)
+    
+    # Context-Aware Filtering: Check simulation result
+    simulation_is_safe = False
+    if simulation_result:
+        is_malicious = simulation_result.get('is_malicious', False)
+        confidence = simulation_result.get('confidence', 0)
+        simulation_is_safe = (not is_malicious) and (confidence >= 85)
+        
+        if simulation_is_safe:
+            print(f"[BROWSER ANALYZER] Simulation marked SAFE ({confidence}% confidence) - filtering to critical/high only")
+            # Only keep critical and high severity findings
+            all_findings = [f for f in all_findings if f['severity'] in ['critical', 'high']]
+            result['simulation_context'] = f'Filtered by simulation (safe {confidence}% confidence)'
+    
     # Sort by severity
     severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
     all_findings.sort(key=lambda x: severity_order.get(x['severity'], 5))
@@ -282,13 +319,24 @@ async def analyze_website_browser(url):
             result['summary'][sev] += 1
     result['summary']['total_findings'] = len(all_findings)
     
-    # Risk level
-    if trusted:
+    # Risk level with context awareness
+    if trusted and simulation_is_safe:
+        result['risk_level'] = 'CLEAN'
+        result['note'] = 'Trusted domain verified safe by runtime simulation'
+    elif trusted:
         result['risk_level'] = 'CRITICAL' if result['summary']['critical'] > 0 else 'CLEAN'
         if result['risk_level'] == 'CLEAN':
             result['note'] = 'Trusted domain - normal DeFi patterns not flagged'
-    else:
+    elif simulation_is_safe:
+        # Simulation says safe, downgrade risk
         if result['summary']['critical'] > 0:
+            result['risk_level'] = 'HIGH'  # Downgrade from CRITICAL
+            result['note'] = 'Simulation marked safe but code patterns detected - manual review suggested'
+        else:
+            result['risk_level'] = 'CLEAN'
+            result['note'] = 'Verified safe by runtime simulation'
+    else:
+        if result['summary']['critical'] > 0 or len(combination_findings) > 0:
             result['risk_level'] = 'CRITICAL'
         elif result['summary']['high'] > 0:
             result['risk_level'] = 'HIGH'
@@ -297,19 +345,26 @@ async def analyze_website_browser(url):
         else:
             result['risk_level'] = 'CLEAN'
     
-    print(f"[BROWSER ANALYZER] Risk: {result['risk_level']} | Scripts: {result['scripts_analyzed']} | Findings: {len(all_findings)}")
+    if len(combination_findings) > 0:
+        combo_note = f"{len(combination_findings)} suspicious pattern combination(s) detected"
+        if 'note' in result:
+            result['note'] += f" | {combo_note}"
+        else:
+            result['note'] = combo_note
+    
+    print(f"[BROWSER ANALYZER] Risk: {result['risk_level']} | Scripts: {result['scripts_analyzed']} | Findings: {len(all_findings)} | Combinations: {len(combination_findings)}")
     
     return result
 
 
-def analyze_website_sync(url):
+def analyze_website_sync(url, simulation_result=None):
     """Synchronous wrapper for the async function."""
     # Use a new event loop to avoid conflicts with Flask/other async frameworks
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(analyze_website_browser(url))
+            return loop.run_until_complete(analyze_website_browser(url, simulation_result))
         finally:
             loop.close()
     except RuntimeError as e:
@@ -317,7 +372,7 @@ def analyze_website_sync(url):
         # If event loop is already running, create a new one in a thread
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(lambda: asyncio.run(analyze_website_browser(url)))
+            future = executor.submit(lambda: asyncio.run(analyze_website_browser(url, simulation_result)))
             return future.result(timeout=90)
     except Exception as e:
         print(f"[BROWSER ANALYZER] Error: {e}")

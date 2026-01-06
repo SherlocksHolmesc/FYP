@@ -1416,16 +1416,7 @@ def generate_website_ml_explanation(features, phishing_probability, url):
             'value': domain.split('.')[-1] if '.' in domain else 'unknown'
         })
     
-    # 2. HTTPS
-    if features.get('has_https', 0) == 1:
-        safe_factors.append({
-            'factor': 'Secure Connection (HTTPS)',
-            'description': 'Site uses HTTPS encryption. Note: while necessary, HTTPS alone doesn\'t guarantee a site is legitimate.',
-            'importance': 'low',
-            'value': 'HTTPS enabled'
-        })
-    
-    # 3. Clean domain (no suspicious patterns)
+    # 2. Clean domain (no suspicious patterns)
     if (features.get('has_suspicious_keywords', 0) == 0 and 
         features.get('has_brand_impersonation', 0) == 0 and
         features.get('has_suspicious_tld', 0) == 0):
@@ -1434,15 +1425,6 @@ def generate_website_ml_explanation(features, phishing_probability, url):
             'description': 'No suspicious keywords, brand impersonation attempts, or high-risk TLDs detected in the URL.',
             'importance': 'medium',
             'value': 'No red flags in URL'
-        })
-    
-    # 4. Simple domain
-    if features.get('num_subdomains', 0) <= 1 and features.get('domain_length', 0) < 20:
-        safe_factors.append({
-            'factor': 'Simple Domain Structure',
-            'description': f'Domain is {features.get("domain_length", 0)} characters with minimal subdomains - typical of legitimate sites.',
-            'importance': 'low',
-            'value': f'{features.get("domain_length", 0)} chars, {features.get("num_subdomains", 0)} subdomain(s)'
         })
     
     # Build explanation
@@ -2280,11 +2262,14 @@ def analyze_browser_endpoint():
     - Executes JavaScript
     - Bypasses basic bot detection
     - Gets dynamically loaded scripts
+    - Context-Aware: Can integrate dApp simulation results to reduce false positives
     
     Use this when /analyze-code fails with "Could not connect"
     
     Query params:
         - url: The website URL to analyze (required)
+        - simulation_is_safe: Whether dApp simulation marked site as safe (optional, bool)
+        - simulation_confidence: Confidence level from dApp simulation (optional, int 0-100)
     """
     url = request.args.get('url', '')
     
@@ -2294,11 +2279,28 @@ def analyze_browser_endpoint():
     if not url.startswith('http'):
         url = 'https://' + url
     
+    # Get simulation context if provided
+    simulation_result = None
+    simulation_is_safe_param = request.args.get('simulation_is_safe', '').lower()
+    simulation_confidence_param = request.args.get('simulation_confidence', '')
+    
+    if simulation_is_safe_param and simulation_confidence_param:
+        try:
+            is_malicious = simulation_is_safe_param not in ['true', 'True', '1']
+            confidence = int(simulation_confidence_param)
+            simulation_result = {
+                'is_malicious': is_malicious,
+                'confidence': confidence
+            }
+            print(f"[CONTEXT-AWARE] Using simulation context: safe={not is_malicious}, confidence={confidence}%")
+        except ValueError:
+            pass  # Ignore invalid parameters
+    
     start_time = time.time()
     
     try:
         from browser_analyzer import analyze_website_sync
-        result = analyze_website_sync(url)
+        result = analyze_website_sync(url, simulation_result=simulation_result)
         result['processing_time_ms'] = int((time.time() - start_time) * 1000)
         return jsonify(result)
     except ImportError:
@@ -2393,6 +2395,77 @@ def simulate_honeypot(address):
         return jsonify({
             'error': str(e),
             'address': address,
+            'status': 'error'
+        }), 500
+
+
+# ============================================================
+# DAPP SIMULATION ENDPOINT (Runtime Testing)
+# ============================================================
+
+@app.route('/simulate-dapp', methods=['GET'])
+def simulate_dapp():
+    """
+    Runtime dApp security testing via browser simulation
+    
+    Opens dApp in controlled browser, injects test wallet, monitors transaction
+    requests and detects malicious behavior.
+    
+    Example: /simulate-dapp?url=https://app.uniswap.org
+    """
+    url = request.args.get('url')
+    
+    if not url:
+        return jsonify({'error': 'Missing url parameter'}), 400
+    
+    # Validate URL format
+    if not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Invalid URL format. Must start with http:// or https://'}), 400
+    
+    print(f"\n[SIMULATE-DAPP] Request for: {url}")
+    
+    try:
+        from dapp_simulator import DAppSimulator
+        
+        # Create simulator
+        simulator = DAppSimulator(verbose=True)
+        
+        # Run analysis
+        result = simulator.analyze(url, timeout=30)
+        
+        # Format response
+        response = {
+            'url': url,
+            'is_malicious': result.get('is_malicious', False),
+            'confidence': result.get('confidence', 0),
+            'reason': result.get('reason', ''),
+            'threats': result.get('threats', []),
+            'transactions_captured': result.get('transactions_captured', 0),
+            'signatures_captured': result.get('signatures_captured', 0),
+            'method': 'RUNTIME_SIMULATION',
+            'timestamp': result.get('timestamp'),
+            'note': 'Tests actual dApp behavior by simulating wallet connection and monitoring requests'
+        }
+        
+        if 'error' in result:
+            response['error'] = result['error']
+            response['pattern'] = result.get('pattern', 'UNKNOWN')
+        
+        return jsonify(response)
+        
+    except ImportError:
+        return jsonify({
+            'error': 'dApp simulator not available. Install: pip install playwright && playwright install chromium',
+            'url': url
+        }), 500
+        
+    except Exception as e:
+        print(f"[ERROR] dApp simulation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'url': url,
             'status': 'error'
         }), 500
 

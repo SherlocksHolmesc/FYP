@@ -1141,6 +1141,8 @@ function Scanner() {
   const [codeAnalysisLoading, setCodeAnalysisLoading] = useState(false)
   const [simulationResult, setSimulationResult] = useState(null)
   const [simulationLoading, setSimulationLoading] = useState(false)
+  const [dappSimulationResult, setDappSimulationResult] = useState(null)
+  const [dappSimulationLoading, setDappSimulationLoading] = useState(false)
   const [error, setError] = useState(null)
   const [expandedSection, setExpandedSection] = useState(null)
 
@@ -1214,6 +1216,32 @@ function Scanner() {
     }
   }
 
+  const runDappSimulation = async () => {
+    if (!websiteInput) {
+      return
+    }
+
+    setDappSimulationLoading(true)
+    setDappSimulationResult(null)
+
+    try {
+      const response = await axios.get(`${API_URL}/simulate-dapp`, {
+        params: { url: websiteInput },
+        timeout: 60000 // 60 second timeout for dApp simulation
+      })
+      console.log('[DAPP SIMULATION] Result:', response.data)
+      setDappSimulationResult(response.data)
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message
+      setDappSimulationResult({
+        error: errorMsg,
+        details: err.response?.data
+      })
+    } finally {
+      setDappSimulationLoading(false)
+    }
+  }
+
   const checkWebsite = async () => {
     if (!websiteInput) {
       setError('Please enter a website URL')
@@ -1224,6 +1252,9 @@ function Scanner() {
     setError(null)
     setResult(null)
     setCodeAnalysis(null)
+    // Clear previous dApp simulation result to prevent flash of old data
+    setDappSimulationResult(null)
+    setDappSimulationLoading(false)
 
     try {
       const response = await axios.get(`${API_URL}/site`, {
@@ -1231,31 +1262,84 @@ function Scanner() {
       })
       setResult({ type: 'website', data: response.data })
       
-      // Also run code analysis for source code inspection
-      setCodeAnalysisLoading(true)
+      // Run dApp simulation FIRST to get context for code analysis
+      setDappSimulationLoading(true)
       try {
-        // Try browser mode directly for more reliable results
-        const codeResponse = await axios.get(`${API_URL}/analyze-browser`, {
+        const simResponse = await axios.get(`${API_URL}/simulate-dapp`, {
           params: { url: websiteInput },
-          timeout: 60000 // 60 second timeout for browser analysis
+          timeout: 60000
         })
+        console.log('[DAPP SIMULATION] Result:', simResponse.data)
+        setDappSimulationResult(simResponse.data)
+        setDappSimulationLoading(false)
         
-        if (codeResponse.data) {
-          codeResponse.data.note = codeResponse.data.method === 'browser' 
-            ? 'Used real browser to load and analyze JavaScript' 
-            : 'Analyzed via HTTP request'
+        // Now run code analysis WITH simulation context
+        setCodeAnalysisLoading(true)
+        try {
+          // Extract simulation context
+          const isMalicious = simResponse.data?.is_malicious || false
+          const confidence = simResponse.data?.confidence || 0
+          const simulationIsSafe = !isMalicious
+          
+          // Try browser mode with context-aware parameters
+          const codeResponse = await axios.get(`${API_URL}/analyze-browser`, {
+            params: { 
+              url: websiteInput,
+              simulation_is_safe: simulationIsSafe,
+              simulation_confidence: confidence
+            },
+            timeout: 60000
+          })
+          
+          if (codeResponse.data) {
+            codeResponse.data.note = codeResponse.data.method === 'browser' 
+              ? `Used real browser to load and analyze JavaScript${simulationIsSafe ? ' (filtered by safe simulation)' : ''}` 
+              : 'Analyzed via HTTP request'
+          }
+          
+          setCodeAnalysis(codeResponse.data)
+        } catch (codeErr) {
+          console.log('Code analysis failed:', codeErr.message)
+          setCodeAnalysis({ 
+            error: codeErr.response?.data?.error || codeErr.message || 'Analysis timed out',
+            url: websiteInput
+          })
+        } finally {
+          setCodeAnalysisLoading(false)
         }
-        
-        setCodeAnalysis(codeResponse.data)
-      } catch (codeErr) {
-        console.log('Code analysis failed:', codeErr.message)
-        // Set error state but don't null it - show the error
-        setCodeAnalysis({ 
-          error: codeErr.response?.data?.error || codeErr.message || 'Analysis timed out',
-          url: websiteInput
+      } catch (simErr) {
+        console.log('[DAPP SIMULATION] Failed:', simErr.message)
+        const errorMsg = simErr.response?.data?.error || simErr.message
+        setDappSimulationResult({
+          error: errorMsg,
+          details: simErr.response?.data
         })
-      } finally {
-        setCodeAnalysisLoading(false)
+        setDappSimulationLoading(false)
+        
+        // Still run code analysis but without simulation context
+        setCodeAnalysisLoading(true)
+        try {
+          const codeResponse = await axios.get(`${API_URL}/analyze-browser`, {
+            params: { url: websiteInput },
+            timeout: 60000
+          })
+          
+          if (codeResponse.data) {
+            codeResponse.data.note = codeResponse.data.method === 'browser' 
+              ? 'Used real browser to load and analyze JavaScript' 
+              : 'Analyzed via HTTP request'
+          }
+          
+          setCodeAnalysis(codeResponse.data)
+        } catch (codeErr) {
+          console.log('Code analysis failed:', codeErr.message)
+          setCodeAnalysis({ 
+            error: codeErr.response?.data?.error || codeErr.message || 'Analysis timed out',
+            url: websiteInput
+          })
+        } finally {
+          setCodeAnalysisLoading(false)
+        }
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check website. Make sure the API is running.')
@@ -2185,22 +2269,6 @@ function Scanner() {
                       const analysis = analyzeWebsiteRisks(result.data)
                       return (
                         <>
-                          {result.data.is_phishing && (
-                            <motion.div
-                              className="result-alert critical"
-                              initial={{ opacity: 0, x: -20 }}
-                              animate={{ opacity: 1, x: 0 }}
-                            >
-                              <div className="alert-icon">🚨</div>
-                              <div className="alert-content">
-                                <div className="alert-title">KNOWN PHISHING SITE</div>
-                                <div className="alert-description">
-                                  This website has been confirmed as a phishing site designed to steal your wallet credentials or trick you into signing malicious transactions. Do NOT connect your wallet.
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-
                           {result.data.is_verified_dapp && (
                             <motion.div
                               className="result-alert success"
@@ -2231,6 +2299,182 @@ function Scanner() {
                                   This project's smart contracts have been audited by security firms, reducing the risk of vulnerabilities.
                                 </div>
                               </div>
+                            </motion.div>
+                          )}
+
+                          {/* dApp Runtime Simulation - Moved before ML Analysis */}
+                          {result.type === 'website' && (
+                            <motion.div
+                              className="result-section"
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.1 }}
+                            >
+                              <div className="section-header">
+                                <h3 className="section-title">
+                                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                                    <path d="M10 2L2 6L10 10L18 6L10 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                                    <path d="M2 14L10 18L18 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                                  </svg>
+                                  Runtime dApp Simulation
+                                </h3>
+                              </div>
+
+                              {dappSimulationLoading ? (
+                                <motion.div
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  style={{
+                                    padding: '20px',
+                                    background: 'rgba(102, 126, 234, 0.1)',
+                                    borderRadius: '12px',
+                                    border: '2px solid rgba(102, 126, 234, 0.3)',
+                                    textAlign: 'center',
+                                    color: '#667eea'
+                                  }}
+                                >
+                                  <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>
+                                    🔬 Running Live Browser Simulation...
+                                  </div>
+                                  <div style={{ fontSize: '14px', opacity: 0.8 }}>
+                                    Testing domain patterns, loading page with mock wallet, monitoring transactions (10-30 seconds)
+                                  </div>
+                                </motion.div>
+                              ) : dappSimulationResult?.error ? (
+                                <div style={{
+                                  padding: '16px',
+                                  background: 'rgba(239, 68, 68, 0.1)',
+                                  borderRadius: '12px',
+                                  border: '2px solid rgba(239, 68, 68, 0.3)',
+                                  color: '#ef4444'
+                                }}>
+                                  <p>⚠️ Simulation error: {dappSimulationResult.error}</p>
+                                </div>
+                              ) : dappSimulationResult ? (
+                                <>
+                                  {/* MALICIOUS dApp Detected */}
+                                  {dappSimulationResult.is_malicious && (
+                                    <motion.div
+                                      initial={{ opacity: 0, scale: 0.95 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      style={{
+                                        padding: '24px',
+                                        background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%)',
+                                        borderRadius: '16px',
+                                        border: '3px solid #ef4444',
+                                        boxShadow: '0 8px 32px rgba(239, 68, 68, 0.3)'
+                                      }}
+                                    >
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '16px',
+                                        marginBottom: '16px'
+                                      }}>
+                                        <div style={{ fontSize: '48px', lineHeight: '1' }}>🚨</div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{
+                                            fontSize: '24px',
+                                            fontWeight: '700',
+                                            color: '#ef4444',
+                                            marginBottom: '8px'
+                                          }}>
+                                            MALICIOUS dApp DETECTED
+                                          </div>
+                                          <div style={{
+                                            fontSize: '16px',
+                                            lineHeight: '1.6',
+                                            marginBottom: '12px'
+                                          }}>
+                                            <strong>⚠️ DO NOT CONNECT YOUR WALLET!</strong> Our runtime simulator loaded this site in a real browser with a mock wallet 
+                                            and detected <strong>{dappSimulationResult.threats?.length || 0} malicious behavior(s)</strong>.
+                                          </div>
+                                          <div style={{
+                                            display: 'inline-block',
+                                            padding: '8px 16px',
+                                            borderRadius: '8px',
+                                            background: '#ef4444',
+                                            color: 'white',
+                                            fontSize: '14px',
+                                            fontWeight: '600'
+                                          }}>
+                                            {dappSimulationResult.confidence}% Confidence - Proven by Browser Test
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Threats moved to Risk Factors section below */}
+
+                                      <div style={{
+                                        marginTop: '16px',
+                                        padding: '12px',
+                                        background: 'rgba(102, 126, 234, 0.2)',
+                                        borderRadius: '8px',
+                                        fontSize: '12px',
+                                        textAlign: 'center',
+                                        color: '#a5b4fc'
+                                      }}>
+                                        🔬 Detection Method: Runtime Browser Simulation with Mock Wallet Injection
+                                      </div>
+                                    </motion.div>
+                                  )}
+
+                                  {/* SAFE dApp */}
+                                  {!dappSimulationResult.is_malicious && (
+                                    <motion.div
+                                      initial={{ opacity: 0, scale: 0.95 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      style={{
+                                        padding: '20px',
+                                        background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(22, 163, 74, 0.1) 100%)',
+                                        borderRadius: '12px',
+                                        border: '2px solid #22c55e'
+                                      }}
+                                    >
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        marginBottom: '12px'
+                                      }}>
+                                        <span style={{ fontSize: '32px' }}>✅</span>
+                                        <div>
+                                          <div style={{
+                                            fontSize: '20px',
+                                            fontWeight: '700',
+                                            color: '#22c55e'
+                                          }}>
+                                            No Malicious Behavior Detected
+                                          </div>
+                                          <div style={{ fontSize: '14px', opacity: 0.9, marginTop: '4px' }}>
+                                            Runtime simulation found no malicious patterns ({dappSimulationResult.confidence}% confidence)
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {dappSimulationResult.threats && dappSimulationResult.threats.length > 0 && (
+                                        <div style={{
+                                          padding: '12px',
+                                          background: 'rgba(0, 0, 0, 0.2)',
+                                          borderRadius: '8px',
+                                          fontSize: '13px'
+                                        }}>
+                                          <strong>Minor observations:</strong> {dappSimulationResult.threats.length} low-priority findings (not malicious)
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  )}
+                                </>
+                              ) : (
+                                <div style={{
+                                  padding: '16px',
+                                  background: 'rgba(255, 255, 255, 0.05)',
+                                  borderRadius: '12px',
+                                  textAlign: 'center',
+                                  opacity: 0.6
+                                }}>
+                                  Waiting for simulation to complete...
+                                </div>
+                              )}
                             </motion.div>
                           )}
 
@@ -2292,7 +2536,17 @@ function Scanner() {
                                       type: 'ml',
                                       severity: f.importance
                                     }))
-                                    const allFactors = [...mlFactors].sort((a, b) => 
+                                    
+                                    // Add dApp simulation threats to risk factors
+                                    const dappThreats = (dappSimulationResult?.threats || []).map(t => ({
+                                      factor: t.type,
+                                      description: t.description,
+                                      severity: t.severity?.toLowerCase() || 'medium',
+                                      value: t.evidence || 'Detected by runtime browser simulation',
+                                      type: 'dapp_simulation'
+                                    }))
+                                    
+                                    const allFactors = [...mlFactors, ...dappThreats].sort((a, b) => 
                                       (severityOrder[a.severity] || 4) - (severityOrder[b.severity] || 4)
                                     )
                                     
@@ -2302,6 +2556,9 @@ function Scanner() {
                                       <div className="ml-factors-section">
                                         <h4 className="factors-title">
                                           <span style={{ color: '#ef4444' }}>⚠️</span> Risk Factors ({allFactors.length})
+                                          {dappThreats.length > 0 && (
+                                            <span style={{ fontSize: '12px', opacity: 0.7, marginLeft: '8px' }}>({dappThreats.length} from browser simulation)</span>
+                                          )}
                                         </h4>
                                         <div className="risk-flags-list">
                                           {allFactors.map((factor, i) => {
@@ -2365,42 +2622,7 @@ function Scanner() {
                                     )
                                   })()}
 
-                                  {/* Safe Factors from ML */}
-                                  {result.data.ml_prediction.analysis.safe_factors && result.data.ml_prediction.analysis.safe_factors.length > 0 && (
-                                    <div className="ml-factors-section" style={{ marginTop: '16px' }}>
-                                      <h4 className="factors-title">
-                                        <span style={{ color: '#22c55e' }}>✓</span> Positive Indicators ({result.data.ml_prediction.analysis.safe_factors.length})
-                                      </h4>
-                                      <div className="risk-flags-list">
-                                        {result.data.ml_prediction.analysis.safe_factors.map((factor, i) => (
-                                          <motion.div
-                                            key={i}
-                                            className="risk-flag-item safe"
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: i * 0.05 }}
-                                          >
-                                            <div className="risk-flag-header">
-                                              <div className="risk-flag-info">
-                                                <span
-                                                  className="risk-flag-severity"
-                                                  style={{ background: '#22c55e' }}
-                                                >
-                                                  GOOD
-                                                </span>
-                                                <span className="risk-flag-name">{factor.factor}</span>
-                                              </div>
-                                            </div>
-                                            <div className="risk-flag-details" style={{ display: 'block', height: 'auto', opacity: 1 }}>
-                                              <div className="risk-flag-description">
-                                                <p>{factor.description}</p>
-                                              </div>
-                                            </div>
-                                          </motion.div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
+                                  {/* Safe Factors from ML - REMOVED */}
 
                                   {/* Technical Feature Analysis
                                   {result.data.ml_prediction.analysis.feature_analysis && (
@@ -2419,13 +2641,13 @@ function Scanner() {
                           )}
  
 
-                          {/* Source Code Analysis - Real Detected Malicious Code */}
-                          {(codeAnalysis || codeAnalysisLoading) && (
+                          {/* Source Code Analysis - Moved before dApp Simulation */}
+                          {result.type === 'website' && (
                             <motion.div
-                              className="result-section code-analysis-section"
-                              initial={{ opacity: 0, y: 10 }}
+                              className="result-section"
+                              initial={{ opacity: 0, y: 20 }}
                               animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: 0.6 }}
+                              transition={{ delay: 0.2 }}
                             >
                               <div className="section-header">
                                 <h3 className="section-title">
@@ -2452,7 +2674,6 @@ function Scanner() {
                                 </div>
                               ) : codeAnalysis?.findings?.length > 0 ? (
                                 <>
-                                  {/* Summary Stats */}
                                   <div className="code-analysis-summary">
                                     <div className="code-stat critical">
                                       <span className="stat-value">{codeAnalysis.summary.critical || 0}</span>
@@ -2471,10 +2692,8 @@ function Scanner() {
                                       <span className="stat-label">Info</span>
                                     </div>
                                   </div>
-
-                                  {/* Detected Malicious Code */}
                                   <div className="detected-code-list">
-                                    {codeAnalysis.findings.slice(0, 10).map((finding, idx) => {
+                                    {codeAnalysis.findings.slice(0, 5).map((finding, idx) => {
                                       const isExpanded = expandedSection === `code-finding-${idx}`
                                       return (
                                         <motion.div
@@ -2505,7 +2724,6 @@ function Scanner() {
                                               <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                                             </svg>
                                           </div>
-
                                           <AnimatePresence>
                                             {isExpanded && (
                                               <motion.div
@@ -2519,13 +2737,10 @@ function Scanner() {
                                                   <strong>⚠️ What this means:</strong>
                                                   <p>{finding.description}</p>
                                                 </div>
-
                                                 <div className="finding-source">
                                                   <span className="source-label">Source:</span>
                                                   <code className="source-file">{finding.source}</code>
                                                 </div>
-
-                                                {/* The actual detected code */}
                                                 <div className="detected-code-block">
                                                   <div className="code-block-header">
                                                     <span>🔍 Detected Code (Line {finding.line_number})</span>
@@ -2549,7 +2764,6 @@ function Scanner() {
                                                     </div>
                                                   )}
                                                 </div>
-
                                                 <div className="finding-recommendation">
                                                   <strong>🛡️ Action Required:</strong>
                                                   <p>
@@ -2567,10 +2781,9 @@ function Scanner() {
                                       )
                                     })}
                                   </div>
-
-                                  {codeAnalysis.findings.length > 10 && (
+                                  {codeAnalysis.findings.length > 5 && (
                                     <p className="more-findings">
-                                      +{codeAnalysis.findings.length - 10} more findings...
+                                      +{codeAnalysis.findings.length - 5} more findings (showing top 5)
                                     </p>
                                   )}
                                 </>
