@@ -1,47 +1,53 @@
-# 🛡️ GuardChain
+<div align="center">
+  <img src="./icons/can-u-make-it-like-svg.svg" alt="Web3 Risk Guard Logo" width="200" height="200" style="margin: 30px 0;">
+</div>
 
-### *Your AI-Powered Guardian Against Web3 Scams*
+<h1 align="center">GuardChain</h1>
 
-> **Protecting users from $2B+ in annual crypto fraud through real-time ML detection, runtime simulation, and behavioral analysis**
+<h3 align="center"><i>Your AI-Powered Guardian Against Web3 Scams</i></h3>
 
-[![Ethereum](https://img.shields.io/badge/Ethereum-3C3C3D?style=for-the-badge&logo=ethereum&logoColor=white)](https://ethereum.org/)
-[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
-[![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
-[![ML](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
+<p align="center">
+  <b>Protecting users from $2B+ in annual crypto fraud through real-time ML detection, runtime simulation, and behavioral analysis</b>
+</p>
 
----
-
-## 🎯 The Problem
-
-Every day, thousands of crypto users lose millions to:
-- **🎣 Phishing sites** - Typosquatting attacks mimicking Uniswap, MetaMask, OpenSea
-- **🍯 Honeypot tokens** - Contracts you can buy but never sell
-- **💸 Crypto drainers** - Malicious dApps stealing wallet funds through unlimited approvals
-- **🎭 IDN homograph attacks** - Unicode domains that look identical to legitimate sites
-
-> **Our mission**: Make Web3 safe for everyone, from beginners to DeFi veterans.
+<p align="center">
+  <a href="#features">View Features</a> •
+  <a href="#tech-stack">Tech Stack</a> •
+  <a href="#installation--setup">Get Started</a> •
+  <a href="SETUP.md">Full Setup</a>
+</p>
 
 ---
 
-## 💡 Our Solution
+## About GuardChain
 
-**Web3 Risk Guard** is a **multi-layered security ecosystem** that analyzes threats from three angles:
+GuardChain is an **AI-powered security ecosystem** that protects Ethereum users from scams in real-time. Through a **combination of machine learning, runtime simulation, and behavioral analysis**, it catches phishing sites, honeypot tokens, and crypto drainers before they steal your funds.
 
-### 🧠 1. Machine Learning Engine
-- Trained on **667 verified fraud cases** using Random Forest classifier
-- **93% accuracy** on legitimate contracts, **85-99% confidence** on scams
-- Real-time behavioral analysis with **17 advanced features** (gas patterns, holder distribution, liquidity metrics)
+Think of it as a **bouncer for Web3** - trained on 667 real fraud cases to identify threats instantly, with zero false positives on legitimate DeFi protocols.
 
-### 🎮 2. Runtime dApp Simulator
-- **Playwright-based** browser automation simulating real user interactions
-- Detects honeypots by attempting **actual buy/sell transactions** on-chain (Ganache fork)
-- **Typosquatting detection** using Levenshtein distance fuzzy matching for 8+ major DeFi brands
-- **100% punycode attack detection** (xn-- domains decoded)
+🔗 **[Try Our Live Scanner](#installation--setup)** | 🌐 **[GitHub](https://github.com/SherlocksHolmesc/FYP)**
 
-### 🔍 3. Source Code Analyzer
-- Scans **30+ malicious patterns** from known drainer kits (Inferno, Pink, Angel/Venom)
-- Smart contract analysis via **Etherscan API** for verified Solidity code
-- **Context-aware filtering** - trusted domains + safe simulation = ZERO false positives
+---
+
+## 🎯 What Makes GuardChain Special?
+
+### 🧠 **ML-Powered Detection**
+- Trained on **667 verified fraud cases** with **93% accuracy**
+- Random Forest classifier analyzing **17 blockchain-specific features**
+- Real-time threat scoring with **85-99% confidence** on scams
+- No hardcoded rules - learns actual fraud patterns
+
+### 🎮 **Runtime dApp Simulator**
+- **Playwright-based** automation that simulates real user interactions
+- Tests if tokens are **actually tradeable** (catches honeypots instantly)
+- **Typosquatting detection** for 8+ major DeFi brands (Uniswap, Aave, etc.)
+- **100% punycode attack prevention** - detects Unicode domain homoglyphs
+
+### 🔍 **Smart Code Analyzer**
+- Scans **30+ malicious patterns** from known drainer kits
+- Retrieves **Solidity source code** via Etherscan API
+- **Context-aware** - trusted domains + safe simulation = zero false positives
+- Pattern recognition for permission abuse and fund theft
 
 ---
 
